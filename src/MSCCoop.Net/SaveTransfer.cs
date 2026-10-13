@@ -18,6 +18,9 @@ public static class SaveTransfer
 
     public static void Send(Session session, Connection to, List<SaveFile> files)
     {
+        session.BeginMessage(MessageType.SaveBegin);
+        session.Send(to, Channel.Bulk);
+
         foreach (var file in files)
         {
             var offset = 0;
@@ -103,7 +106,7 @@ public sealed class SaveReceiver
             files[name] = data;
             received[name] = 0;
         }
-        if (data.Length != total)
+        if (data.Length != total || received[name] + count > total)
             return false;
 
         r.ReadBytes(data, (int)offset, count);

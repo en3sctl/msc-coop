@@ -32,10 +32,11 @@ public enum MessageType : byte
     PlayerJoined = 7,
     PlayerLeft = 8,
     FirstGameMessage = 32,
-    SaveChunk = 32,
-    SaveComplete = 33,
-    StartGame = 34,
-    ClientReady = 35,
+    SaveBegin = 32,
+    SaveChunk = 33,
+    SaveComplete = 34,
+    StartGame = 35,
+    Ready = 36,
 }
 
 public enum RejectReason : byte

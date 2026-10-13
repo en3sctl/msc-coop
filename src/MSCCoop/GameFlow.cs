@@ -24,6 +24,8 @@ sealed class GameFlow(string clientSaveDir)
     Collider newGameButton;
     bool saveReady;
     bool startingFromHost;
+    bool saveSent;
+    bool returnToMenu;
 
     static bool InMenu => Application.loadedLevelName == MenuScene;
     static bool InGame => Application.loadedLevelName == GameScene;
@@ -43,6 +45,7 @@ sealed class GameFlow(string clientSaveDir)
         config.AcceptingJoins = !InGame;
         receiver.Reset();
         saveReady = false;
+        startingFromHost = false;
         session.MessageReceived += OnMessage;
     }
 
@@ -54,31 +57,38 @@ sealed class GameFlow(string clientSaveDir)
         if (!wasClient)
             return;
 
-        ES2GlobalSettings.defaultPCDataPath = "";
-        if (!InMenu)
-        {
-            ModConsole.Print("Co-op: returning to the main menu.");
-            Application.LoadLevel(MenuScene);
-        }
+        // A session can drop while the host's save is loading; clearing the redirect then would let the
+        // client continue into its own save, so it is only cleared once the client is back in the menu.
+        if (InMenu && !startingFromHost)
+            ES2GlobalSettings.defaultPCDataPath = "";
+        else
+            returnToMenu = true;
     }
 
     public void OnLevelLoaded()
     {
-        if (config != null)
-            config.AcceptingJoins = !InGame && session != null && session.IsHost;
-
         if (InMenu)
-            HookMenu();
-        else if (InGame && session != null && !session.IsHost)
         {
-            if (!startingFromHost)
+            if (session == null || session.IsHost)
+                ES2GlobalSettings.defaultPCDataPath = "";
+            returnToMenu = false;
+            HookMenu();
+        }
+        if (config != null)
+            config.AcceptingJoins = InMenu && session != null && session.IsHost;
+
+        if (InGame && session != null)
+        {
+            if (!session.IsHost && !startingFromHost)
             {
                 ModConsole.Error("Co-op: loaded a game without the host, leaving the session.");
                 session.Leave();
-                return;
             }
-            session.BeginMessage(MessageType.ClientReady);
-            session.Send(session.HostConnection, Channel.Control);
+            else
+            {
+                session.BeginMessage(MessageType.Ready);
+                session.Broadcast(Channel.Control);
+            }
         }
         startingFromHost = false;
     }
@@ -87,12 +97,23 @@ sealed class GameFlow(string clientSaveDir)
     {
         if (InMenu)
             SetMenuButtons(session == null || session.IsHost);
+
+        if (returnToMenu && InGame && !Application.isLoadingLevel)
+        {
+            returnToMenu = false;
+            ModConsole.Print("Co-op: returning to the main menu.");
+            Application.LoadLevel(MenuScene);
+        }
     }
 
     void HookMenu()
     {
         var button = GameObject.Find("Interface/Buttons/ButtonContinue");
-        continueFsm = button.GetPlayMaker("SetSize");
+        var fsm = button.GetPlayMaker("SetSize");
+        if (fsm == continueFsm)
+            return;
+        continueFsm = fsm;
+        saveSent = false;
         continueButton = button.GetComponent<Collider>();
         newGameButton = GameObject.Find("Interface/Buttons/ButtonNewgame").GetComponent<Collider>();
         continueFsm.FsmInject(ContinueState, OnContinue, index: 0);
@@ -109,8 +130,9 @@ sealed class GameFlow(string clientSaveDir)
 
     void OnContinue()
     {
-        if (session == null || !session.IsHost)
+        if (session == null || !session.IsHost || saveSent)
             return;
+        saveSent = true;
 
         var files = ReadSave(Application.persistentDataPath);
         var connections = session.Connections;
@@ -121,6 +143,7 @@ sealed class GameFlow(string clientSaveDir)
             SaveTransfer.Send(session, connections[i], files);
             session.BeginMessage(MessageType.StartGame);
             session.Send(connections[i], Channel.Bulk);
+            connections[i].Loading = true;
         }
         config.AcceptingJoins = false;
         ModConsole.Print("Co-op: sent save to " + connections.Count + " player(s).");
@@ -130,6 +153,10 @@ sealed class GameFlow(string clientSaveDir)
     {
         switch (type)
         {
+            case MessageType.SaveBegin when !session.IsHost:
+                receiver.Reset();
+                saveReady = false;
+                break;
             case MessageType.SaveChunk when !session.IsHost:
                 if (!receiver.HandleChunk(reader))
                     Fail("received a malformed save chunk.");
@@ -146,15 +173,20 @@ sealed class GameFlow(string clientSaveDir)
                 }
                 break;
             case MessageType.StartGame when !session.IsHost:
-                if (saveReady && InMenu)
+                if (!saveReady || !InMenu)
                 {
-                    ES2GlobalSettings.defaultPCDataPath = clientSaveDir;
-                    startingFromHost = true;
-                    continueFsm.SendEvent(ContinueEvent);
+                    Fail("the host started the game before the save was ready.");
+                    break;
                 }
+                ES2GlobalSettings.defaultPCDataPath = clientSaveDir;
+                startingFromHost = true;
+                from.Loading = true;
+                continueFsm.SendEvent(ContinueEvent);
                 break;
-            case MessageType.ClientReady when session.IsHost:
-                ModConsole.Print("Co-op: player in slot " + from.Slot + " finished loading.");
+            case MessageType.Ready:
+                from.Loading = false;
+                if (session.IsHost)
+                    ModConsole.Print("Co-op: player in slot " + from.Slot + " finished loading.");
                 break;
         }
     }

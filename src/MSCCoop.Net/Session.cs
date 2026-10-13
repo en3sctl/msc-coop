@@ -25,6 +25,7 @@ public sealed class SessionConfig
     public uint GameBuild;
     public string PlayerName = "";
     public double Timeout = 15;
+    public double LoadingTimeout = 120;
     public double ConnectTimeout = 10;
     public double HelloInterval = 1;
     public double PingInterval = 0.5;
@@ -46,6 +47,9 @@ public sealed class Connection(ulong id)
     public byte Slot;
     public bool Established;
     public double LastReceived;
+
+    // Level loads block the main thread, so a peer that is loading goes silent for a long time.
+    public bool Loading;
     internal double NextPing;
 }
 
@@ -143,7 +147,7 @@ public sealed class Session
             var c = connections[i];
             if (!c.Established)
                 continue;
-            if (now - c.LastReceived > config.Timeout)
+            if (now - c.LastReceived > (c.Loading ? config.LoadingTimeout : config.Timeout))
             {
                 Drop(c, EndReason.TimedOut);
                 continue;

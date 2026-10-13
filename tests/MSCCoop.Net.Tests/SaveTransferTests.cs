@@ -70,6 +70,60 @@ public class SaveTransferTests
     }
 
     [Fact]
+    public void RepeatedTransferStartsOver()
+    {
+        var (host, client) = Connect();
+        var receiver = new SaveReceiver();
+        var completed = 0;
+        client.MessageReceived += (from, type, r) =>
+        {
+            if (type == MessageType.SaveBegin)
+                receiver.Reset();
+            else if (type == MessageType.SaveChunk)
+                Assert.True(receiver.HandleChunk(r));
+            else if (type == MessageType.SaveComplete && receiver.Complete(r, out _))
+                completed++;
+        };
+
+        SaveTransfer.Send(host, host.Connections[0], SampleFiles());
+        SaveTransfer.Send(host, host.Connections[0], SampleFiles());
+        Run(host, client);
+        Assert.Equal(2, completed);
+    }
+
+    [Fact]
+    public void DuplicateChunkIsRefused()
+    {
+        var buffer = new byte[256];
+        var w = new BitWriter(buffer);
+        w.WriteString("items.txt", SaveTransfer.MaxNameChars);
+        w.WriteUInt(3);
+        w.WriteUInt(0);
+        w.WriteUShort(3);
+        w.WriteBytes(new byte[] { 1, 2, 3 }, 0, 3);
+        var receiver = new SaveReceiver();
+        Assert.True(receiver.HandleChunk(new BitReader(buffer, w.Length)));
+        Assert.False(receiver.HandleChunk(new BitReader(buffer, w.Length)));
+    }
+
+    [Fact]
+    public void LoadingPeerGetsLongerTimeout()
+    {
+        var (host, client) = Connect();
+        host.Connections[0].Loading = true;
+        for (var i = 0; i < 60 * 50; i++)
+        {
+            now += 0.02;
+            host.Update(now);
+        }
+        Assert.Single(host.Connections);
+
+        host.Connections[0].Loading = false;
+        Run(host);
+        Assert.Empty(host.Connections);
+    }
+
+    [Fact]
     public void MissingChunkFailsVerification()
     {
         var (host, client) = Connect();
