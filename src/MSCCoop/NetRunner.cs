@@ -23,6 +23,7 @@ sealed class NetRunner : MonoBehaviour
     LanTransport lan;
     SimulatedTransport sim;
     Session session;
+    GameFlow flow;
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -32,16 +33,18 @@ sealed class NetRunner : MonoBehaviour
 
     public bool Active => session != null && session.State != SessionState.Idle;
 
-    public void Init(string version)
+    public void Init(string version, string clientSaveDir)
     {
         modVersion = version;
+        flow = new GameFlow(clientSaveDir);
+        flow.OnLevelLoaded();
         gameBuild = ComputeGameBuild();
         try
         {
             playerName = SteamFriends.GetPersonaName();
             lobby = new SteamLobby(modVersion, gameBuild);
             lobby.Hosted += () => StartSession(steam, host: true, 0);
-            lobby.JoinedAsClient += owner => StartSession(steam, host: false, owner);
+            lobby.JoinedAsClient += OnJoinedLobby;
             lobby.Failed += message => ModConsole.Error("Co-op: " + message);
             lobby.MemberLeft += OnLobbyMemberLeft;
             steam = new SteamTransport(lobby.IsMember);
@@ -72,7 +75,7 @@ sealed class NetRunner : MonoBehaviour
 
     public void JoinSteam(ulong lobbyId)
     {
-        if (!RequireSteam() || !RequireIdle())
+        if (!RequireSteam() || !RequireIdle() || !flow.CanJoin())
             return;
         lobby.Join(lobbyId);
     }
@@ -94,7 +97,7 @@ sealed class NetRunner : MonoBehaviour
 
     public void JoinLan(IPAddress address, int port)
     {
-        if (!RequireIdle())
+        if (!RequireIdle() || !flow.CanJoin())
             return;
         lan?.Dispose();
         lan = LanTransport.Connect(address, port);
@@ -121,7 +124,9 @@ sealed class NetRunner : MonoBehaviour
     {
         sim = new SimulatedTransport(transport, Environment.TickCount);
         ApplySimulation();
-        session = new Session(sim, new SessionConfig { ModVersion = modVersion, GameBuild = gameBuild, PlayerName = playerName });
+        var config = new SessionConfig { ModVersion = modVersion, GameBuild = gameBuild, PlayerName = playerName };
+        session = new Session(sim, config);
+        flow.Attach(session, config);
         session.PlayerJoined += p => ModConsole.Print("Co-op: " + p.Name + " joined");
         session.PlayerLeft += p => ModConsole.Print("Co-op: " + p.Name + " left");
         session.Ended += OnEnded;
@@ -132,8 +137,17 @@ sealed class NetRunner : MonoBehaviour
         ModConsole.Print(host ? "Co-op: hosting" : "Co-op: connecting");
     }
 
+    void OnJoinedLobby(ulong owner)
+    {
+        if (flow.CanJoin())
+            StartSession(steam, host: false, owner);
+        else
+            lobby.Leave();
+    }
+
     void OnEnded(EndReason reason)
     {
+        flow.Detach();
         var text = reason == EndReason.Rejected ? "rejected (" + session.LastRejectReason + ")" : reason.ToString();
         ModConsole.Print("Co-op: session ended, " + text);
         lobby?.Leave();
@@ -180,12 +194,15 @@ sealed class NetRunner : MonoBehaviour
     {
         steam?.Update(Now);
         session?.Update(Now);
+        flow.Update();
         if (overlay && Time.unscaledTime >= nextStatus)
         {
             nextStatus = Time.unscaledTime + StatusInterval;
             statusText = BuildStatus();
         }
     }
+
+    void OnLevelWasLoaded(int level) => flow.OnLevelLoaded();
 
     void OnGUI()
     {
@@ -232,14 +249,18 @@ sealed class NetRunner : MonoBehaviour
     // Steam's build id is missing when the game runs outside Steam. The game assembly's MVID changes with every game update.
     static uint ComputeGameBuild()
     {
-        var hash = 2166136261u;
-        foreach (var b in typeof(CarDynamics).Assembly.ManifestModule.ModuleVersionId.ToByteArray())
-        {
-            hash ^= b;
-            hash *= 16777619;
-        }
-        return hash;
+        var mvid = typeof(CarDynamics).Assembly.ManifestModule.ModuleVersionId.ToByteArray();
+        return Fnv.Hash32(mvid, 0, mvid.Length);
     }
 
     void OnApplicationQuit() => Leave();
+
+    // MSCLoader destroys every object, DontDestroyOnLoad ones included, when the game returns to the main menu.
+    void OnDestroy()
+    {
+        Leave();
+        lobby?.Dispose();
+        steam?.Dispose();
+        lan?.Dispose();
+    }
 }

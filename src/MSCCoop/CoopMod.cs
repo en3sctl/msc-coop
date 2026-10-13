@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO;
 using System.Net;
 using MSCLoader;
 using UnityEngine;
@@ -24,7 +25,7 @@ public class CoopMod : Mod
         var go = new GameObject("MSCCoop");
         Object.DontDestroyOnLoad(go);
         runner = go.AddComponent<NetRunner>();
-        runner.Init(Version);
+        runner.Init(Version, Path.Combine(ModLoader.GetModSettingsFolder(this), "client-save"));
         ConsoleCommand.Add(new CoopCommand(runner));
     }
 }
