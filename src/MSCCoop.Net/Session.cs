@@ -28,6 +28,7 @@ public sealed class SessionConfig
     public double ConnectTimeout = 10;
     public double HelloInterval = 1;
     public double PingInterval = 0.5;
+    public bool AcceptingJoins = true;
 }
 
 public sealed class PlayerInfo(byte slot, ulong id, string name)
@@ -293,6 +294,11 @@ public sealed class Session
         var c = Find(peer);
         if (c == null)
         {
+            if (!config.AcceptingJoins)
+            {
+                SendReject(peer, RejectReason.InProgress);
+                return;
+            }
             var slot = FreeSlot();
             if (slot < 0)
             {

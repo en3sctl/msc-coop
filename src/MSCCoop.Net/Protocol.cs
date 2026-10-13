@@ -32,6 +32,10 @@ public enum MessageType : byte
     PlayerJoined = 7,
     PlayerLeft = 8,
     FirstGameMessage = 32,
+    SaveChunk = 32,
+    SaveComplete = 33,
+    StartGame = 34,
+    ClientReady = 35,
 }
 
 public enum RejectReason : byte
@@ -40,4 +44,5 @@ public enum RejectReason : byte
     ModVersionMismatch = 2,
     GameBuildMismatch = 3,
     Full = 4,
+    InProgress = 5,
 }
