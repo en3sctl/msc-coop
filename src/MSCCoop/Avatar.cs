@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using MSCCoop.Net;
 using MSCLoader;
 using UnityEngine;
@@ -14,22 +15,37 @@ sealed class Avatar
     const float WalkThreshold = 0.25f;
     const float CrossFade = 0.2f;
     const float NameTagHeight = 2.05f;
+    const string SkeletonName = "skeleton";
+
+    // Traffic drivers share the walkers' rig but have no animation: their skeleton is posed seated.
+    const string SeatedTemplate = "VehiclesHighway/FITTAN/LOD/Passengers/Driver/skeleton";
 
     static readonly string[] Looks = { "Kale", "Julli", "Kristian", "Unto" };
-    static bool clipsLogged;
 
     readonly GameObject root;
     readonly Animation animation;
     readonly Transform nameTag;
-    readonly string sitClip;
+    readonly Transform[] bones;
+    readonly Pose[] standingPose;
+    readonly Pose[] seatedPose;
     string playing;
+    bool seated;
 
-    Avatar(GameObject root, Animation animation, Transform nameTag, string sitClip)
+    struct Pose
+    {
+        public bool Valid;
+        public Vector3 Position;
+        public Quaternion Rotation;
+    }
+
+    Avatar(GameObject root, Animation animation, Transform nameTag, Transform[] bones, Pose[] standingPose, Pose[] seatedPose)
     {
         this.root = root;
         this.animation = animation;
         this.nameTag = nameTag;
-        this.sitClip = sitClip;
+        this.bones = bones;
+        this.standingPose = standingPose;
+        this.seatedPose = seatedPose;
     }
 
     public static Avatar Create(byte slot, string name)
@@ -54,23 +70,14 @@ sealed class Avatar
             Object.DestroyImmediate(body);
         copy.SetActive(true);
 
-        var animation = copy.GetComponentInChildren<Animation>();
-        string sitClip = null;
-        foreach (AnimationState state in animation)
-        {
-            if (sitClip == null && state.name.Contains("_sit"))
-                sitClip = state.name;
-        }
-        if (!clipsLogged)
-        {
-            clipsLogged = true;
-            var names = "";
-            foreach (AnimationState state in animation)
-                names += state.name + " ";
-            ModConsole.Print("Co-op: avatar clips: " + names);
-        }
+        var skeleton = copy.transform.Find(SkeletonName);
+        var bones = skeleton.GetComponentsInChildren<Transform>(true);
+        var standing = new Pose[bones.Length];
+        for (var i = 0; i < bones.Length; i++)
+            standing[i] = new Pose { Valid = true, Position = bones[i].localPosition, Rotation = bones[i].localRotation };
 
-        return new Avatar(copy, animation, CreateNameTag(copy.transform, name), sitClip);
+        return new Avatar(copy, copy.GetComponentInChildren<Animation>(), CreateNameTag(copy.transform, name),
+            bones, standing, CaptureSeatedPose(skeleton, bones));
     }
 
     public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Transform camera)
@@ -80,10 +87,16 @@ sealed class Avatar
         if (camera != null)
             nameTag.rotation = camera.rotation;
 
+        if ((flags & PlayerFlags.InVehicle) != 0 && seatedPose != null)
+        {
+            Sit();
+            return;
+        }
+        if (seated)
+            Stand();
+
         var speed = new Vector2(velocity.x, velocity.z).magnitude;
-        if ((flags & PlayerFlags.InVehicle) != 0 && sitClip != null)
-            Play(sitClip);
-        else if (speed > WalkThreshold)
+        if (speed > WalkThreshold)
         {
             Play(WalkClip);
             animation[WalkClip].speed = speed / WalkClipSpeed;
@@ -94,12 +107,70 @@ sealed class Avatar
 
     public void Destroy() => Object.Destroy(root);
 
+    void Sit()
+    {
+        if (seated)
+            return;
+        seated = true;
+        animation.Stop();
+        playing = null;
+        SetPose(seatedPose);
+    }
+
+    void Stand()
+    {
+        seated = false;
+        SetPose(standingPose);
+    }
+
+    void SetPose(Pose[] pose)
+    {
+        for (var i = 0; i < bones.Length; i++)
+        {
+            if (!pose[i].Valid)
+                continue;
+            bones[i].localPosition = pose[i].Position;
+            bones[i].localRotation = pose[i].Rotation;
+        }
+    }
+
     void Play(string clip)
     {
         if (clip == playing || animation[clip] == null)
             return;
         playing = clip;
         animation.CrossFade(clip, CrossFade);
+    }
+
+    static Pose[] CaptureSeatedPose(Transform skeleton, Transform[] bones)
+    {
+        var traffic = GameObject.Find("TRAFFIC");
+        var source = traffic == null ? null : traffic.transform.Find(SeatedTemplate);
+        if (source == null)
+        {
+            ModConsole.Warning("Co-op: no seated driver found, remote players will stand in vehicles.");
+            return null;
+        }
+
+        var byPath = new Dictionary<string, Transform>();
+        foreach (var t in source.GetComponentsInChildren<Transform>(true))
+            byPath[RelativePath(source, t)] = t;
+
+        var pose = new Pose[bones.Length];
+        for (var i = 0; i < bones.Length; i++)
+        {
+            if (byPath.TryGetValue(RelativePath(skeleton, bones[i]), out var match))
+                pose[i] = new Pose { Valid = true, Position = match.localPosition, Rotation = match.localRotation };
+        }
+        return pose;
+    }
+
+    static string RelativePath(Transform root, Transform t)
+    {
+        var path = "";
+        for (var current = t; current != root; current = current.parent)
+            path = current.name + "/" + path;
+        return path;
     }
 
     static Transform CreateNameTag(Transform parent, string name)
@@ -111,7 +182,7 @@ sealed class Avatar
         text.font = (Font)Resources.GetBuiltinResource(typeof(Font), "Arial.ttf");
         text.text = name;
         text.fontSize = 64;
-        text.characterSize = 0.02f;
+        text.characterSize = 0.01f;
         text.anchor = TextAnchor.LowerCenter;
         text.alignment = TextAlignment.Center;
         text.color = Color.white;
