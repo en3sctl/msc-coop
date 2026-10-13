@@ -225,6 +225,26 @@ static class SceneDump
             w.WriteValue(c == null ? "<missing>" : c.GetType().FullName);
         w.WriteEndArray();
 
+        var animation = go.GetComponent<Animation>();
+        if (animation != null)
+        {
+            w.WritePropertyName("clips");
+            w.WriteStartArray();
+            foreach (AnimationState state in animation)
+                w.WriteValue(state.name + ":" + state.length.ToString("0.00"));
+            w.WriteEndArray();
+        }
+
+        var skinned = go.GetComponent<SkinnedMeshRenderer>();
+        if (skinned != null)
+        {
+            w.WritePropertyName("materials");
+            w.WriteStartArray();
+            foreach (var m in skinned.sharedMaterials)
+                w.WriteValue(m == null ? null : m.name);
+            w.WriteEndArray();
+        }
+
         var rb = go.GetComponent<Rigidbody>();
         if (rb != null)
         {
