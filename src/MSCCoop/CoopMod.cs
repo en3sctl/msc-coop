@@ -1,3 +1,4 @@
+using System;
 using System.Globalization;
 using System.IO;
 using System.Net;
@@ -16,14 +17,18 @@ public class CoopMod : Mod
 
     NetRunner runner;
 
-    public override void ModSetup() => SetupFunction(Setup.OnMenuLoad, Init);
+    public override void ModSetup()
+    {
+        SetupFunction(Setup.OnMenuLoad, Init);
+        SetupFunction(Setup.PostLoad, () => runner.OnGameReady());
+    }
 
     void Init()
     {
         if (runner != null)
             return;
         var go = new GameObject("MSCCoop");
-        Object.DontDestroyOnLoad(go);
+        UnityEngine.Object.DontDestroyOnLoad(go);
         runner = go.AddComponent<NetRunner>();
         runner.Init(Version, Path.Combine(ModLoader.GetModSettingsFolder(this), "client-save"));
         ConsoleCommand.Add(new CoopCommand(runner));
@@ -35,11 +40,12 @@ class CoopCommand(NetRunner runner) : ConsoleCommand
     public override string Name => "coop";
 
     public override string Help =>
-        "coop host | coop host lan [port] | coop join lan <ip> [port] | coop invite | coop leave | " +
-        "coop sim <latency ms> <jitter ms> <loss %> | coop overlay";
+        "coop host | coop host lan [port] | coop join lan IP [port] | coop invite | coop leave | " +
+        "coop sim LATENCY_MS JITTER_MS LOSS_PERCENT | coop overlay";
 
-    public override void Run(string[] args)
+    public override void Run(string[] rawArgs)
     {
+        var args = Array.FindAll(rawArgs, a => a.Length > 0);
         var verb = args.Length > 0 ? args[0] : "";
         var lan = args.Length > 1 && args[1] == "lan";
         switch (verb)

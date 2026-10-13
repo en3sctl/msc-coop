@@ -45,9 +45,11 @@ sealed class PlayerSync
     {
         RemoveAll();
         player = null;
-        if (Application.loadedLevelName != "GAME")
-            return;
+    }
 
+    // PLAYER stays inactive until the level has finished its own loading, so it is looked up from PostLoad.
+    public void OnGameReady()
+    {
         var go = GameObject.Find("PLAYER");
         if (go == null)
             return;

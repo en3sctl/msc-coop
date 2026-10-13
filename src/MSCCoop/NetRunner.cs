@@ -206,6 +206,12 @@ sealed class NetRunner : MonoBehaviour
         }
     }
 
+    public void OnGameReady()
+    {
+        flow.OnGameReady();
+        players.OnGameReady();
+    }
+
     void OnLevelWasLoaded(int level)
     {
         flow.OnLevelLoaded();

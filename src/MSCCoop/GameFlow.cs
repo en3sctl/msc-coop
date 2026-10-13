@@ -77,20 +77,20 @@ sealed class GameFlow(string clientSaveDir)
         if (config != null)
             config.AcceptingJoins = InMenu && session != null && session.IsHost;
 
-        if (InGame && session != null)
+        if (InGame && session != null && !session.IsHost && !startingFromHost)
         {
-            if (!session.IsHost && !startingFromHost)
-            {
-                ModConsole.Error("Co-op: loaded a game without the host, leaving the session.");
-                session.Leave();
-            }
-            else
-            {
-                session.BeginMessage(MessageType.Ready);
-                session.Broadcast(Channel.Control);
-            }
+            ModConsole.Error("Co-op: loaded a game without the host, leaving the session.");
+            session.Leave();
         }
         startingFromHost = false;
+    }
+
+    public void OnGameReady()
+    {
+        if (session == null)
+            return;
+        session.BeginMessage(MessageType.Ready);
+        session.Broadcast(Channel.Control);
     }
 
     public void Update()
