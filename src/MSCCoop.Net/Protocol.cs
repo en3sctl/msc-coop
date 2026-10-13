@@ -37,6 +37,7 @@ public enum MessageType : byte
     SaveComplete = 34,
     StartGame = 35,
     Ready = 36,
+    PlayerState = 37,
 }
 
 public enum RejectReason : byte

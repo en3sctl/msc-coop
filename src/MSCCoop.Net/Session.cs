@@ -91,6 +91,9 @@ public sealed class Session
     public PlayerInfo[] Players => players;
     public double Now => now;
 
+    // Shared timeline for everything stamped by different machines: the host's clock.
+    public double HostTime => IsHost || connections.Count == 0 ? now : now + connections[0].Clock.Offset;
+
     public void Host(double time)
     {
         Reset();

@@ -24,6 +24,7 @@ sealed class NetRunner : MonoBehaviour
     SimulatedTransport sim;
     Session session;
     GameFlow flow;
+    readonly PlayerSync players = new();
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -127,6 +128,7 @@ sealed class NetRunner : MonoBehaviour
         var config = new SessionConfig { ModVersion = modVersion, GameBuild = gameBuild, PlayerName = playerName };
         session = new Session(sim, config);
         flow.Attach(session, config);
+        players.Attach(session);
         session.PlayerJoined += p => ModConsole.Print("Co-op: " + p.Name + " joined");
         session.PlayerLeft += p => ModConsole.Print("Co-op: " + p.Name + " left");
         session.Ended += OnEnded;
@@ -148,6 +150,7 @@ sealed class NetRunner : MonoBehaviour
     void OnEnded(EndReason reason)
     {
         flow.Detach();
+        players.Detach();
         var text = reason == EndReason.Rejected ? "rejected (" + session.LastRejectReason + ")" : reason.ToString();
         ModConsole.Print("Co-op: session ended, " + text);
         lobby?.Leave();
@@ -195,6 +198,7 @@ sealed class NetRunner : MonoBehaviour
         steam?.Update(Now);
         session?.Update(Now);
         flow.Update();
+        players.Update(Time.deltaTime);
         if (overlay && Time.unscaledTime >= nextStatus)
         {
             nextStatus = Time.unscaledTime + StatusInterval;
@@ -202,7 +206,11 @@ sealed class NetRunner : MonoBehaviour
         }
     }
 
-    void OnLevelWasLoaded(int level) => flow.OnLevelLoaded();
+    void OnLevelWasLoaded(int level)
+    {
+        flow.OnLevelLoaded();
+        players.OnLevelLoaded();
+    }
 
     void OnGUI()
     {
