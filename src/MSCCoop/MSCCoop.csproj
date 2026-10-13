@@ -14,6 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\MSCCoop.Net\MSCCoop.Net.csproj" Private="false" />
     <Reference Include="MSCLoader" HintPath="$(ManagedDir)\MSCLoader.dll" Private="false" />
+    <Reference Include="Assembly-CSharp" HintPath="$(ManagedDir)\Assembly-CSharp.dll" Private="false" />
     <Reference Include="Assembly-CSharp-firstpass" HintPath="$(ManagedDir)\Assembly-CSharp-firstpass.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(ManagedDir)\UnityEngine.dll" Private="false" />
   </ItemGroup>

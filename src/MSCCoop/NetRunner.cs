@@ -35,9 +35,9 @@ sealed class NetRunner : MonoBehaviour
     public void Init(string version)
     {
         modVersion = version;
+        gameBuild = ComputeGameBuild();
         try
         {
-            gameBuild = (uint)SteamApps.GetAppBuildId();
             playerName = SteamFriends.GetPersonaName();
             lobby = new SteamLobby(modVersion, gameBuild);
             lobby.Hosted += () => StartSession(steam, host: true, 0);
@@ -227,6 +227,18 @@ sealed class NetRunner : MonoBehaviour
                 return connections[i];
         }
         return null;
+    }
+
+    // Steam's build id is missing when the game runs outside Steam. The game assembly's MVID changes with every game update.
+    static uint ComputeGameBuild()
+    {
+        var hash = 2166136261u;
+        foreach (var b in typeof(CarDynamics).Assembly.ManifestModule.ModuleVersionId.ToByteArray())
+        {
+            hash ^= b;
+            hash *= 16777619;
+        }
+        return hash;
     }
 
     void OnApplicationQuit() => Leave();
