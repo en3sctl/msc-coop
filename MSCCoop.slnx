@@ -1,0 +1,5 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/MSCCoop.Recon/MSCCoop.Recon.csproj" />
+  </Folder>
+</Solution>
