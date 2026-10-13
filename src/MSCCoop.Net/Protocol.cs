@@ -1,0 +1,43 @@
+namespace MSCCoop.Net;
+
+public static class Protocol
+{
+    public const ushort Magic = 0x4D43;
+    public const byte Version = 1;
+    public const int HeaderBits = 24;
+    public const int MaxPlayers = 4;
+    public const int MaxNameChars = 32;
+    public const int MaxVersionChars = 16;
+
+    // Legacy Steam P2P drops unreliable packets above 1200 bytes; leave room for its own overhead.
+    public const int MaxUnreliableBytes = 1024;
+    public const int MaxReliableBytes = 16 * 1024;
+}
+
+public enum Channel : byte
+{
+    Control = 0,
+    State = 1,
+    Bulk = 2,
+}
+
+public enum MessageType : byte
+{
+    Hello = 1,
+    Welcome = 2,
+    Reject = 3,
+    Disconnect = 4,
+    Ping = 5,
+    Pong = 6,
+    PlayerJoined = 7,
+    PlayerLeft = 8,
+    FirstGameMessage = 32,
+}
+
+public enum RejectReason : byte
+{
+    ProtocolMismatch = 1,
+    ModVersionMismatch = 2,
+    GameBuildMismatch = 3,
+    Full = 4,
+}
