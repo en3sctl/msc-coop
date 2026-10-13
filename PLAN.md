@@ -336,7 +336,7 @@ Her faz bir öncekinin kabul kriteri sağlanmadan başlamaz.
 
 | Karar | Öneri |
 |---|---|
-| Lisans | MIT. MSCMP alıntılarıyla uyumlu ve modderlar için en serbest. MSCLoader GPLv3 ama modlar ona sadece referans veriyor, topluluk modlarının çoğu MIT |
+| Lisans | Karar verildi: CC BY-NC-SA 4.0. Atıf zorunlu, ticari kullanım yasak, türevler aynı lisansla açık kalmak zorunda. MSCMP'den alınan kodda MIT telif notu korunur |
 | Maksimum oyuncu | Mimari 4'e göre. İlk sürüm 2 oyuncuyla test edilir |
 | Para | Ortak cüzdan (co-op'a uygun). Alternatif: kişisel cüzdan |
 | Kayıt | Sadece host |
