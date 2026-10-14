@@ -174,7 +174,7 @@ sealed class PlayerSync(ObjectRegistry registry)
     public void LateUpdate(float deltaTime)
     {
         for (var slot = 0; slot < avatars.Length; slot++)
-            avatars[slot]?.Look(pitches[slot], deltaTime);
+            avatars[slot]?.LateUpdate(pitches[slot], deltaTime);
     }
 
     // Taken from where the camera looks, not from one transform's angles: which object in the

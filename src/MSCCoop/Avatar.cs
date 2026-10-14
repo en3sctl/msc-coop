@@ -20,6 +20,9 @@ sealed class Avatar
     const float NameTagReferenceDistance = 8f;
     const float LookSmoothing = 12f;
     const float ChestShareOfPitch = 0.4f;
+    const float CrouchDepth = 0.42f;
+    const float CrouchLean = 20f;
+    const float CrouchSpeed = 6f;
 
     // Traffic drivers share the walkers' rig but have no animation: their skeleton is posed seated.
     const string SeatedTemplate = "VehiclesHighway/FITTAN/LOD/Passengers/Driver/skeleton";
@@ -37,8 +40,14 @@ sealed class Avatar
     readonly int head;
     readonly int chest;
     readonly int headPivot = -1;
+    readonly int pelvis;
+    readonly int[] thighs;
+    readonly int[] knees;
+    readonly int[] ankles;
     Quaternion facing = Quaternion.identity;
     float pitch;
+    float crouch;
+    bool crouching;
     string playing;
     bool seated;
 
@@ -64,18 +73,17 @@ sealed class Avatar
         head = System.Array.FindIndex(bones, b => b.name == "head");
         chest = System.Array.FindIndex(bones, b => b.name == "spine_upper");
 
-        // HeadPivot is the helper the NPC's look-at FSM turns towards the player. Whatever it was
-        // looking at when the walker was copied would otherwise stay baked into the avatar.
+        pelvis = Bone("pelvis");
+        thighs = new[] { Bone("thig_left"), Bone("thig_right") };
+        knees = new[] { Bone("knee_left"), Bone("knee_right") };
+        ankles = new[] { Bone("ankle_left"), Bone("ankle_right") };
+
+        // HeadPivot is what the NPC's look-at FSM aims at its target, so it is aimed the same way here.
         if (head >= 0)
         {
             var pivot = System.Array.IndexOf(bones, bones[head].parent);
             if (pivot >= 0 && bones[pivot].name.StartsWith("HeadPivot"))
-            {
                 headPivot = pivot;
-                standingPose[pivot].Rotation = Quaternion.identity;
-                if (seatedPose != null)
-                    seatedPose[pivot].Rotation = Quaternion.identity;
-            }
         }
     }
 
@@ -120,6 +128,7 @@ sealed class Avatar
     public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Transform camera)
     {
         var inVehicle = (flags & PlayerFlags.InVehicle) != 0;
+        crouching = !inVehicle && (flags & PlayerFlags.Crouching) != 0;
         facing = rotation;
         root.transform.position = position + rotation * modelOffset;
         root.transform.rotation = rotation * modelRotation;
@@ -134,7 +143,7 @@ sealed class Avatar
         if ((flags & PlayerFlags.InVehicle) != 0 && seatedPose != null)
         {
             Sit();
-            ResetLookBones();
+            ResetPoseBones();
             // In a vehicle the position is the player's eyes, so the head is put there.
             if (inVehicle && head >= 0)
                 root.transform.position += position - bones[head].position;
@@ -142,7 +151,7 @@ sealed class Avatar
         }
         if (seated)
             Stand();
-        ResetLookBones();
+        ResetPoseBones();
 
         var speed = new Vector2(velocity.x, velocity.z).magnitude;
         if (speed > WalkThreshold)
@@ -154,26 +163,79 @@ sealed class Avatar
             Play(StandClip);
     }
 
-    // Runs after animation has posed the skeleton; ResetLookBones keeps the additive turn from
-    // piling up on bones the current clip does not key.
-    public void Look(float targetPitch, float deltaTime)
+    // Runs after animation has posed the skeleton. ResetPoseBones put every bone touched here back
+    // to its pose in Update, so these adjustments cannot pile up on bones a clip does not key.
+    public void LateUpdate(float targetPitch, float deltaTime)
     {
         pitch = Mathf.Lerp(pitch, targetPitch, Mathf.Min(1f, deltaTime * LookSmoothing));
+        crouch = Mathf.MoveTowards(crouch, crouching && !seated ? 1f : 0f, deltaTime * CrouchSpeed);
         var right = facing * Vector3.right;
+
+        if (crouch > 0)
+            Crouch(right);
         if (chest >= 0)
             bones[chest].rotation = Quaternion.AngleAxis(pitch * ChestShareOfPitch, right) * bones[chest].rotation;
-        if (head >= 0)
+        if (headPivot >= 0)
+            bones[headPivot].rotation = facing * Quaternion.Euler(pitch, 0, 0);
+        else if (head >= 0)
             bones[head].rotation = Quaternion.AngleAxis(pitch * (1 - ChestShareOfPitch), right) * bones[head].rotation;
+    }
+
+    // There is no crouch clip for NPCs, so the skeleton is lowered with the feet kept where the
+    // animation put them and each leg solved as a two-bone chain bending the knee forward.
+    void Crouch(Vector3 right)
+    {
+        var leftFoot = ankles[0] >= 0 ? bones[ankles[0]].position : Vector3.zero;
+        var rightFoot = ankles[1] >= 0 ? bones[ankles[1]].position : Vector3.zero;
+
+        bones[0].position -= Vector3.up * (CrouchDepth * crouch);
+        if (pelvis >= 0)
+            bones[pelvis].rotation = Quaternion.AngleAxis(CrouchLean * crouch, right) * bones[pelvis].rotation;
+
+        var forward = facing * Vector3.forward;
+        for (var i = 0; i < 2; i++)
+        {
+            if (thighs[i] >= 0 && knees[i] >= 0 && ankles[i] >= 0)
+                SolveLeg(bones[thighs[i]], bones[knees[i]], bones[ankles[i]], i == 0 ? leftFoot : rightFoot, forward);
+        }
+    }
+
+    static void SolveLeg(Transform thigh, Transform knee, Transform ankle, Vector3 target, Vector3 bendHint)
+    {
+        var hip = thigh.position;
+        var upper = Vector3.Distance(hip, knee.position);
+        var lower = Vector3.Distance(knee.position, ankle.position);
+        var toTarget = target - hip;
+        var reach = Mathf.Clamp(toTarget.magnitude, 0.01f, upper + lower - 0.001f);
+        var direction = toTarget.normalized;
+
+        var along = (upper * upper - lower * lower + reach * reach) / (2 * reach);
+        var side = Mathf.Sqrt(Mathf.Max(upper * upper - along * along, 0));
+        var bend = (bendHint - Vector3.Dot(bendHint, direction) * direction).normalized;
+        var kneeTarget = hip + direction * along + bend * side;
+
+        thigh.rotation = Quaternion.FromToRotation(knee.position - hip, kneeTarget - hip) * thigh.rotation;
+        knee.rotation = Quaternion.FromToRotation(ankle.position - knee.position, target - knee.position) * knee.rotation;
     }
 
     public void Destroy() => Object.Destroy(root);
 
-    void ResetLookBones()
+    void ResetPoseBones()
     {
+        var pose = seated ? seatedPose : standingPose;
+        if (pose[0].Valid)
+            bones[0].localPosition = pose[0].Position;
         ResetBone(head);
         ResetBone(chest);
-        ResetBone(headPivot);
+        ResetBone(pelvis);
+        for (var i = 0; i < 2; i++)
+        {
+            ResetBone(thighs[i]);
+            ResetBone(knees[i]);
+        }
     }
+
+    int Bone(string name) => System.Array.FindIndex(bones, b => b.name == name);
 
     void ResetBone(int i)
     {
