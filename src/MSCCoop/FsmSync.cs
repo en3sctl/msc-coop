@@ -123,6 +123,9 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                 case "Assemble":
                     HookSteps(fsm, IsWireStep);
                     break;
+                case "BoltCheck" when fsm.GetState("Break off") != null:
+                    HookSteps(fsm, IsBreakOff);
+                    break;
             }
         }
         if (unsupported > 0)
@@ -235,6 +238,9 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
 
     // A wire end connects in "Sound", which also tells the other end of the wire to close the loop.
     static bool IsWireStep(string state) => state == "Sound";
+
+    // Loose parts break off on a random roll during crashes, which only the driver's machine simulates.
+    static bool IsBreakOff(string state) => state == "Break off";
 
     void HookSteps(PlayMakerFSM fsm, System.Func<string, bool> isStep)
     {
