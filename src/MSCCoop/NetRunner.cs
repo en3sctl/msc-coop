@@ -28,6 +28,7 @@ sealed class NetRunner : MonoBehaviour
     PlayerSync players;
     FsmSync fsms;
     readonly WorldSync world = new();
+    readonly MoneySync money = new();
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -138,6 +139,7 @@ sealed class NetRunner : MonoBehaviour
         objects.Attach(session);
         fsms.Attach(session);
         world.Attach(session);
+        money.Attach(session);
         session.PlayerJoined += p => ModConsole.Print("Co-op: " + p.Name + " joined");
         session.PlayerLeft += p => ModConsole.Print("Co-op: " + p.Name + " left");
         session.Ended += OnEnded;
@@ -163,6 +165,7 @@ sealed class NetRunner : MonoBehaviour
         objects.Detach();
         fsms.Detach();
         world.Detach();
+        money.Detach();
         var text = reason == EndReason.Rejected ? "rejected (" + session.LastRejectReason + ")" : reason.ToString();
         ModConsole.Print("Co-op: session ended, " + text);
         lobby?.Leave();
@@ -213,6 +216,7 @@ sealed class NetRunner : MonoBehaviour
         players.Update(Time.deltaTime);
         objects.Update();
         world.Update();
+        money.Update();
         if (overlay && Time.unscaledTime >= nextStatus)
         {
             nextStatus = Time.unscaledTime + StatusInterval;
@@ -225,6 +229,7 @@ sealed class NetRunner : MonoBehaviour
         objects.OnGameReady();
         fsms.OnGameReady();
         world.OnGameReady();
+        money.OnGameReady();
         flow.OnGameReady();
         players.OnGameReady();
     }
@@ -239,6 +244,7 @@ sealed class NetRunner : MonoBehaviour
         players.OnLevelLoaded();
         objects.OnLevelLoaded();
         world.OnLevelLoaded();
+        money.OnLevelLoaded();
     }
 
     void OnGUI()

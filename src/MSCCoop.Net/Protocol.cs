@@ -50,6 +50,8 @@ public enum MessageType : byte
     WorldTime = 47,
     WorldWeather = 48,
     VehicleStates = 49,
+    MoneyDelta = 50,
+    MoneyTotal = 51,
 }
 
 public enum RejectReason : byte
