@@ -38,6 +38,12 @@ public enum MessageType : byte
     StartGame = 35,
     Ready = 36,
     PlayerState = 37,
+    ObjectHello = 38,
+    ObjectSnapshot = 39,
+    ObjectClaim = 40,
+    ObjectRelease = 41,
+    ObjectOwner = 42,
+    ObjectStates = 43,
 }
 
 public enum RejectReason : byte

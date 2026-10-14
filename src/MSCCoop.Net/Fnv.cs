@@ -15,6 +15,16 @@ public static class Fnv
         return hash;
     }
 
+    public static uint Hash32(string text, uint hash = Offset32)
+    {
+        for (var i = 0; i < text.Length; i++)
+        {
+            hash ^= text[i];
+            hash *= 16777619;
+        }
+        return hash;
+    }
+
     public static ulong Hash64(string text, ulong hash = Offset64)
     {
         for (var i = 0; i < text.Length; i++)
