@@ -35,7 +35,7 @@ public class ReconMod : Mod
 
     internal string NewOutputDir(string label)
     {
-        var dir = Path.Combine(ModLoader.GetModSettingsFolder(this), label + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+        var dir = Path.Combine(ModLoader.GetModSettingsFolder(this), label + "-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + System.Diagnostics.Process.GetCurrentProcess().Id);
         Directory.CreateDirectory(dir);
         return dir;
     }
