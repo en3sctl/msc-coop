@@ -10,6 +10,8 @@ sealed class NetObject(uint id, GameObject go)
     public readonly uint Id = id;
     public readonly GameObject Go = go;
     public readonly int Layer = go.layer;
+    public readonly bool IsVehicle = go.GetComponent<CarDynamics>() != null;
+    public Collider[] SeatTriggers;
     public Rigidbody Body;
     public int NextBodyCheck;
     public OwnerInfo Owner = new() { Owner = Ownership.NoOwner };
@@ -148,7 +150,7 @@ sealed class ObjectRegistry
             return true;
         if (go.CompareTag("RAGDOLL") || go.layer == boltsLayer)
             return true;
-        return root.GetComponent<CarDynamics>() != null;
+        return go.transform != root && root.GetComponent<CarDynamics>() != null;
     }
 
     // Unity 5.0 has no GameObject.scene. A root that is active but not active in hierarchy can only be an asset.

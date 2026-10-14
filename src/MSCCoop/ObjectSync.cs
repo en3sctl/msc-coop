@@ -27,6 +27,8 @@ sealed class ObjectSync
     const string HandPath = "PLAYER/Pivot/AnimPivot/Camera/FPSCamera/1Hand_Assemble/Hand";
     static readonly string[] PickupStates = { "Set pivot", "Set pivot 2", "Tool picked" };
     static readonly string[] DropStates = { "Drop part", "Drop part 2", "Drop tool" };
+    const string DriveState = "Player in car";
+    static readonly string[] LeaveStates = { "Create player", "Create player 2" };
 
     readonly ObjectRegistry registry = new();
     readonly Ownership table = new();
@@ -43,6 +45,8 @@ sealed class ObjectSync
 
     bool Active => session != null && session.State == SessionState.Connected && built;
     byte Local => session.LocalSlot;
+
+    public ObjectRegistry Registry => registry;
 
     public void Attach(Session newSession)
     {
@@ -78,6 +82,7 @@ sealed class ObjectSync
         registry.Build();
         built = true;
         HookPickup();
+        HookVehicles();
         ModConsole.Print("Co-op: tracking " + registry.Objects.Count + " objects.");
 
         if (session.IsHost)
@@ -366,17 +371,25 @@ sealed class ObjectSync
         obj.Owner = info;
         obj.Pending = false;
         obj.RestSteps = 0;
+        var heldElsewhere = info.IsOwned && info.Owner != Local && info.Held;
+        if (obj.SeatTriggers != null)
+        {
+            foreach (var trigger in obj.SeatTriggers)
+                trigger.enabled = !heldElsewhere;
+        }
+
         if (info.IsOwned && info.Owner != Local)
         {
             BeginProxy(obj);
-            obj.Go.layer = info.Held ? HeldElsewhereLayer : obj.Layer;
+            if (!obj.IsVehicle)
+                obj.Go.layer = heldElsewhere ? HeldElsewhereLayer : obj.Layer;
             if (pickedObject != null && pickedObject.Value == obj.Go)
                 pickUp.SendEvent("PROCEED Drop");
         }
         else
         {
             EndProxy(obj);
-            if (obj.Go.layer == HeldElsewhereLayer && (pickedObject == null || pickedObject.Value != obj.Go))
+            if (!obj.IsVehicle && obj.Go.layer == HeldElsewhereLayer && (pickedObject == null || pickedObject.Value != obj.Go))
                 obj.Go.layer = obj.Layer;
         }
     }
@@ -503,6 +516,34 @@ sealed class ObjectSync
             pickUp.FsmInject(state, OnLocalDrop, index: 0);
     }
 
+    // Entering the driver's seat holds the vehicle; nobody else can drive it until the driver gets out.
+    void HookVehicles()
+    {
+        foreach (var obj in registry.Objects)
+        {
+            if (!obj.IsVehicle)
+                continue;
+            foreach (var fsm in obj.Go.GetComponentsInChildren<PlayMakerFSM>(true))
+            {
+                if (fsm.FsmName != "PlayerTrigger" || fsm.gameObject.name != "DriveTrigger")
+                    continue;
+                var vehicle = obj;
+                fsm.FsmInject(DriveState, () => OnDrive(vehicle, true), index: 0);
+                foreach (var state in LeaveStates)
+                    fsm.FsmInject(state, () => OnDrive(vehicle, false), index: 0);
+                obj.SeatTriggers = fsm.GetComponents<Collider>();
+            }
+        }
+    }
+
+    void OnDrive(NetObject vehicle, bool driving)
+    {
+        if (!Active || vehicle.Owner.Owner == Local && vehicle.Owner.Held == driving)
+            return;
+        if (driving || vehicle.Owner.Owner == Local)
+            Claim(vehicle, held: driving);
+    }
+
     void OnLocalPickup()
     {
         if (!Active)
@@ -523,6 +564,13 @@ sealed class ObjectSync
 
     void ApplyProxy(NetObject obj, Rigidbody body, double hostTime, float dt)
     {
+        // The game toggles some bodies itself, e.g. the Satsuma while a tool is in hand.
+        if (body != null && !body.isKinematic)
+        {
+            obj.GameKinematic = false;
+            body.isKinematic = true;
+        }
+
         var buffer = obj.Buffer;
         if (buffer.Count == 0)
             return;
