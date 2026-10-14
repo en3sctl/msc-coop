@@ -244,7 +244,14 @@ sealed class LanTransport : ITransport
         {
             var available = p.Tcp.Available;
             if (available == 0)
-                return !p.Tcp.Poll(0, SelectMode.SelectRead);
+            {
+                // Readable with nothing to read means closed, but data may have arrived between the two calls.
+                if (!p.Tcp.Poll(0, SelectMode.SelectRead))
+                    return true;
+                available = p.Tcp.Available;
+                if (available == 0)
+                    return false;
+            }
             var space = InboxSize - p.InboxCount;
             if (space == 0)
                 return false;

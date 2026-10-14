@@ -13,6 +13,8 @@ sealed class NetRunner : MonoBehaviour
 {
     const float StatusInterval = 0.25f;
 
+    static bool launchOptionsApplied;
+
     readonly Stopwatch clock = Stopwatch.StartNew();
     readonly StringBuilder status = new();
     string modVersion;
@@ -62,6 +64,10 @@ sealed class NetRunner : MonoBehaviour
             ModConsole.Warning("Co-op: Steam is not available, only LAN sessions will work. " + e.Message);
         }
 
+        // MSCLoader recreates every mod object on each return to the menu; launch options apply once.
+        if (launchOptionsApplied)
+            return;
+        launchOptionsApplied = true;
         var args = Environment.GetCommandLineArgs();
         for (var i = 0; i < args.Length - 1; i++)
         {
