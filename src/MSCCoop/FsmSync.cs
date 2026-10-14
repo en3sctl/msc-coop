@@ -15,6 +15,17 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     const string AssembleEvent2 = "MSCCOOP_ASSEMBLE2";
     const string RemoveEvent = "MSCCOOP_REMOVE";
     const string StageEvent = "MSCCOOP_STAGE";
+    const string ToggleEvent = "MSCCOOP_TOGGLE_";
+
+    // Doors, hoods, lids and similar: the game plays an animation in these states, so entering the
+    // same state on every machine reproduces the movement and the sound.
+    static readonly string[][] TogglePairs =
+    {
+        new[] { "Open door", "Close door" },
+        new[] { "Open hood", "Close hood" },
+        new[] { "Open hood 2", "Close hood 2" },
+        new[] { "Open", "Close" },
+    };
 
     sealed class Bolt
     {
@@ -24,6 +35,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
 
     readonly Dictionary<PlayMakerFSM, Bolt> bolts = new();
     readonly HashSet<PlayMakerFSM> turning = new();
+    readonly Dictionary<PlayMakerFSM, string[]> toggles = new();
+    readonly Dictionary<PlayMakerFSM, int> toggleState = new();
     Session session;
     bool applying;
     int unsupported;
@@ -41,11 +54,15 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         session = null;
         bolts.Clear();
         turning.Clear();
+        toggles.Clear();
+        toggleState.Clear();
     }
 
     public void OnGameReady()
     {
         bolts.Clear();
+        toggles.Clear();
+        toggleState.Clear();
         unsupported = 0;
         foreach (var fsm in registry.Fsms)
         {
@@ -59,6 +76,9 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                     break;
                 case "Screw":
                     HookScrew(fsm);
+                    break;
+                case "Use":
+                    HookToggle(fsm);
                     break;
             }
         }
@@ -115,6 +135,46 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         fsm.FsmInject("Unscrew 2", () => OnLocalTurn(fsm), index: 0);
         fsm.FsmInject("Get scroll 2", () => OnStageSettled(fsm), index: 0);
         fsm.AddGlobalTransition(StageEvent, "Stages 2");
+    }
+
+    void HookToggle(PlayMakerFSM fsm)
+    {
+        foreach (var pair in TogglePairs)
+        {
+            if (fsm.GetState(pair[0]) == null || fsm.GetState(pair[1]) == null)
+                continue;
+            toggles[fsm] = pair;
+            for (var i = 0; i < pair.Length; i++)
+            {
+                var index = i;
+                fsm.FsmInject(pair[i], () => OnLocalToggle(fsm, index), index: 0);
+                fsm.AddGlobalTransition(ToggleEvent + i, pair[i]);
+            }
+            return;
+        }
+    }
+
+    void OnLocalToggle(PlayMakerFSM fsm, int index)
+    {
+        if (applying || !Active || !registry.TryGetFsmId(fsm, out var id))
+            return;
+        toggleState[fsm] = index;
+        var w = session.BeginMessage(MessageType.ToggleState);
+        w.WriteUInt(id);
+        w.WriteByte((byte)index);
+        session.Broadcast(Channel.Control);
+    }
+
+    void ApplyToggle(uint id, int index)
+    {
+        var fsm = registry.FindFsm(id);
+        if (fsm == null || !toggles.TryGetValue(fsm, out var pair) || index >= pair.Length)
+            return;
+        // Replaying the state the door is already in would snap its animation back and play it again.
+        if (toggleState.TryGetValue(fsm, out var current) && current == index)
+            return;
+        toggleState[fsm] = index;
+        Apply(fsm, ToggleEvent + index);
     }
 
     void OnLocalAssemble(PlayMakerFSM fsm, FsmGameObject partVar, byte variant)
@@ -195,6 +255,20 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                     session.Broadcast(Channel.Control, from);
                 }
                 ApplyRemove(removalId);
+                break;
+            case MessageType.ToggleState:
+                var toggleId = r.ReadUInt();
+                var toggleIndex = r.ReadByte();
+                if (r.Overflow)
+                    return;
+                if (ShouldRelay)
+                {
+                    var w = session.BeginMessage(type);
+                    w.WriteUInt(toggleId);
+                    w.WriteByte(toggleIndex);
+                    session.Broadcast(Channel.Control, from);
+                }
+                ApplyToggle(toggleId, toggleIndex);
                 break;
             case MessageType.BoltStage:
                 var boltId = r.ReadUInt();

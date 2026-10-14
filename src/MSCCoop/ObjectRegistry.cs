@@ -47,7 +47,7 @@ sealed class NetObject(uint id, GameObject go)
 sealed class ObjectRegistry
 {
     static readonly string[] ExcludedRoots = { "PLAYER", "TRAFFIC", "NPC_CARS", "HUMANS", "RALLY" };
-    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw" };
+    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use" };
 
     readonly List<KeyValuePair<string, GameObject>> awake = new();
     readonly List<KeyValuePair<string, PlayMakerFSM>> awakeFsms = new();

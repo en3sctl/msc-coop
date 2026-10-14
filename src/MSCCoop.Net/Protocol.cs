@@ -52,6 +52,7 @@ public enum MessageType : byte
     VehicleStates = 49,
     MoneyDelta = 50,
     MoneyTotal = 51,
+    ToggleState = 52,
 }
 
 public enum RejectReason : byte
