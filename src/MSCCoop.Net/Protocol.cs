@@ -55,7 +55,8 @@ public enum MessageType : byte
     ToggleState = 52,
     SharedDeltas = 53,
     SharedTotals = 54,
-    ScrewTurn = 55,
+    StateStep = 55,
+    ObjectGone = 56,
 }
 
 public enum RejectReason : byte

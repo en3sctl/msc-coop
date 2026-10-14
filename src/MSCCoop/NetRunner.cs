@@ -239,6 +239,7 @@ sealed class NetRunner : MonoBehaviour
         players.Update(Time.deltaTime);
         objects.Update();
         world.Update();
+        fsms.Update();
         money.Update();
         shared.Update();
         if (overlay && Time.unscaledTime >= nextStatus)
@@ -257,6 +258,8 @@ sealed class NetRunner : MonoBehaviour
         shared.OnGameReady();
         flow.OnGameReady();
         players.OnGameReady();
+        if (session != null)
+            session.HoldGameMessages = false;
     }
 
     void FixedUpdate() => objects.FixedUpdate();
@@ -265,6 +268,8 @@ sealed class NetRunner : MonoBehaviour
 
     void OnLevelWasLoaded(int level)
     {
+        if (session != null)
+            session.HoldGameMessages = Application.loadedLevelName == "GAME";
         flow.OnLevelLoaded();
         players.OnLevelLoaded();
         objects.OnLevelLoaded();

@@ -117,9 +117,14 @@ sealed class ObjectSync
         var dt = Time.fixedDeltaTime;
 
         var objects = registry.Objects;
-        for (var i = 0; i < objects.Count; i++)
+        for (var i = objects.Count - 1; i >= 0; i--)
         {
             var obj = objects[i];
+            if (obj.Go == null)
+            {
+                Gone(obj);
+                continue;
+            }
             var body = Body(obj);
             if (obj.Proxy)
             {
@@ -292,6 +297,33 @@ sealed class ObjectSync
     {
         RefreshBody(obj);
         claimNextStep.Add(obj);
+    }
+
+    // Food that is eaten, bottles that are emptied and parts some assemblies replace with a fixed
+    // mesh destroy themselves on the machine where it happened.
+    void Gone(NetObject obj)
+    {
+        registry.Remove(obj);
+        if (obj.DestroyedByNetwork)
+            return;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("gone " + obj.Id.ToString("x8") + " " + obj.Key);
+        session.BeginMessage(MessageType.ObjectGone).WriteUInt(obj.Id);
+        session.Broadcast(Channel.Control);
+    }
+
+    void HandleGone(Connection from, uint id)
+    {
+        if (session.IsHost && session.Connections.Count > 1)
+        {
+            session.BeginMessage(MessageType.ObjectGone).WriteUInt(id);
+            session.Broadcast(Channel.Control, from);
+        }
+        var obj = registry.Find(id);
+        if (obj == null || obj.Go == null)
+            return;
+        obj.DestroyedByNetwork = true;
+        Object.Destroy(obj.Go);
     }
 
     void TrackRest(NetObject obj, Rigidbody body)
@@ -467,6 +499,11 @@ sealed class ObjectSync
                 break;
             case MessageType.VehicleStates:
                 ReadVehicles(from, r);
+                break;
+            case MessageType.ObjectGone:
+                var goneId = r.ReadUInt();
+                if (!r.Overflow)
+                    HandleGone(from, goneId);
                 break;
         }
     }

@@ -43,6 +43,7 @@ sealed class NetObject(uint id, GameObject go)
     public Vector3 LastSentPosition;
     public double LastSentTime = double.NaN;
     public float LastHeldLocally = float.NegativeInfinity;
+    public bool DestroyedByNetwork;
 }
 
 // Identifies every synced rigidbody the same way on every machine. Scene objects are keyed by their
@@ -52,7 +53,7 @@ sealed class ObjectRegistry
 {
     // Moved by their own logic on every machine, so each machine would keep claiming them.
     static readonly string[] ExcludedRoots = { "PLAYER", "TRAFFIC", "NPC_CARS", "HUMANS", "RALLY", "TRAIN" };
-    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use", "Data" };
+    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use", "Data", "Assemble" };
 
     readonly List<KeyValuePair<string, GameObject>> awake = new();
     readonly List<KeyValuePair<string, PlayMakerFSM>> awakeFsms = new();
@@ -83,6 +84,13 @@ sealed class ObjectRegistry
     }
 
     public NetObject Find(uint id) => byId.TryGetValue(id, out var o) ? o : null;
+
+    public void Remove(NetObject obj)
+    {
+        Objects.Remove(obj);
+        byId.Remove(obj.Id);
+        byObject.Remove(obj.Go);
+    }
 
     public PlayMakerFSM FindFsm(uint id) => fsmsById.TryGetValue(id, out var f) ? f : null;
 

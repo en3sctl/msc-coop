@@ -16,7 +16,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     const string RemoveEvent = "MSCCOOP_REMOVE";
     const string StageEvent = "MSCCOOP_STAGE";
     const string ToggleEvent = "MSCCOOP_TOGGLE_";
-    const string TurnEvent = "MSCCOOP_TURN_";
+    const string StepEvent = "MSCCOOP_STEP_";
 
     // Doors, hoods, lids and similar: the game plays an animation in these states, so entering the
     // same state on every machine reproduces the movement and the sound.
@@ -38,6 +38,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     readonly HashSet<PlayMakerFSM> turning = new();
     readonly Dictionary<PlayMakerFSM, string[]> toggles = new();
     readonly Dictionary<PlayMakerFSM, int> toggleState = new();
+    readonly List<KeyValuePair<PlayMakerFSM, string>> deferred = new();
+    const int MaxDeferred = 2000;
     Session session;
     bool applying;
     int unsupported;
@@ -61,7 +63,40 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         turning.Clear();
         toggles.Clear();
         toggleState.Clear();
+        deferred.Clear();
     }
+
+    // Events for FSMs that were inactive when they arrived, e.g. doors of a building switched off by
+    // distance, are entered once the FSM is running again, in the order they arrived.
+    public void Update()
+    {
+        if (deferred.Count == 0)
+            return;
+        var kept = 0;
+        for (var i = 0; i < deferred.Count; i++)
+        {
+            var e = deferred[i];
+            if (e.Key == null)
+                continue;
+            if (IsRunning(e.Key) && !HasEarlierDeferred(e.Key, kept))
+                Enter(e.Key, e.Value);
+            else
+                deferred[kept++] = e;
+        }
+        deferred.RemoveRange(kept, deferred.Count - kept);
+    }
+
+    bool HasEarlierDeferred(PlayMakerFSM fsm, int before)
+    {
+        for (var i = 0; i < before; i++)
+        {
+            if (deferred[i].Key == fsm)
+                return true;
+        }
+        return false;
+    }
+
+    static bool IsRunning(PlayMakerFSM fsm) => fsm.enabled && fsm.gameObject.activeInHierarchy && fsm.Fsm.Started;
 
     public void OnGameReady()
     {
@@ -84,6 +119,9 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                     break;
                 case "Use":
                     HookToggle(fsm);
+                    break;
+                case "Assemble":
+                    HookSteps(fsm, IsWireStep);
                     break;
             }
         }
@@ -191,29 +229,36 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     // Adjusting screws (carburettor, valves, steering wheel bolts) and caps step a value in a Screw or
     // Unscrew state. Each step is deterministic, so replaying the same states in order on every
     // machine over the reliable channel keeps the values equal.
-    void HookTurns(PlayMakerFSM fsm)
+    void HookTurns(PlayMakerFSM fsm) => HookSteps(fsm, IsTurnStep);
+
+    static bool IsTurnStep(string state) => state.StartsWith("Screw") || state.StartsWith("Unscrew");
+
+    // A wire end connects in "Sound", which also tells the other end of the wire to close the loop.
+    static bool IsWireStep(string state) => state == "Sound";
+
+    void HookSteps(PlayMakerFSM fsm, System.Func<string, bool> isStep)
     {
         var states = fsm.FsmStates;
         var hooked = false;
         for (var i = 0; i < states.Length; i++)
         {
             var name = states[i].Name;
-            if (!name.StartsWith("Screw") && !name.StartsWith("Unscrew"))
+            if (!isStep(name))
                 continue;
             var index = i;
-            fsm.FsmInject(name, () => OnLocalTurnStep(fsm, index), index: 0);
-            fsm.AddSharedGlobalTransition(TurnEvent + name, name);
+            fsm.FsmInject(name, () => OnLocalStep(fsm, index), index: 0);
+            fsm.AddSharedGlobalTransition(StepEvent + name, name);
             hooked = true;
         }
         if (!hooked)
             unsupported++;
     }
 
-    void OnLocalTurnStep(PlayMakerFSM fsm, int stateIndex)
+    void OnLocalStep(PlayMakerFSM fsm, int stateIndex)
     {
         if (applying || !Active || !registry.TryGetFsmId(fsm, out var id))
             return;
-        var w = session.BeginMessage(MessageType.ScrewTurn);
+        var w = session.BeginMessage(MessageType.StateStep);
         w.WriteUInt(id);
         w.WriteByte((byte)stateIndex);
         session.Broadcast(Channel.Control);
@@ -222,15 +267,15 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
     }
 
-    void ApplyTurnStep(uint id, int stateIndex)
+    void ApplyStep(uint id, int stateIndex)
     {
         var fsm = registry.FindFsm(id);
         if (fsm == null || stateIndex >= fsm.FsmStates.Length)
         {
-            MarkUnknown("ApplyTurnStep", id);
+            MarkUnknown("ApplyStep", id);
             return;
         }
-        Apply(fsm, TurnEvent + fsm.FsmStates[stateIndex].Name);
+        Apply(fsm, StepEvent + fsm.FsmStates[stateIndex].Name);
     }
 
     void OnLocalAssemble(PlayMakerFSM fsm, FsmGameObject partVar, byte variant)
@@ -321,7 +366,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                 }
                 ApplyRemove(removalId);
                 break;
-            case MessageType.ScrewTurn:
+            case MessageType.StateStep:
                 var turnId = r.ReadUInt();
                 var turnState = r.ReadByte();
                 if (r.Overflow)
@@ -333,7 +378,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                     w.WriteByte(turnState);
                     session.Broadcast(Channel.Control, from);
                 }
-                ApplyTurnStep(turnId, turnState);
+                ApplyStep(turnId, turnState);
                 break;
             case MessageType.ToggleState:
                 var toggleId = r.ReadUInt();
@@ -424,6 +469,19 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     void Apply(PlayMakerFSM fsm, string eventName)
     {
         Applied++;
+        if (IsRunning(fsm) && !HasEarlierDeferred(fsm, deferred.Count))
+        {
+            Enter(fsm, eventName);
+            return;
+        }
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm defer " + registry.FsmKey(fsm) + " " + eventName);
+        if (deferred.Count < MaxDeferred)
+            deferred.Add(new KeyValuePair<PlayMakerFSM, string>(fsm, eventName));
+    }
+
+    void Enter(PlayMakerFSM fsm, string eventName)
+    {
         if (Diagnostics.Logging)
             Diagnostics.Log("fsm apply " + registry.FsmKey(fsm) + " " + eventName + " from " + fsm.ActiveStateName);
         applying = true;
