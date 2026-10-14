@@ -59,7 +59,8 @@ sealed class Avatar
         this.bones = bones;
         this.standingPose = standingPose;
         this.seatedPose = seatedPose;
-        head = System.Array.FindIndex(bones, b => b.name == "HeadPivot");
+        // The head's parent is numbered per walker ("HeadPivot 1", "HeadPivot 2"); the head bone is not.
+        head = System.Array.FindIndex(bones, b => b.name == "head");
         chest = System.Array.FindIndex(bones, b => b.name == "spine_upper");
     }
 

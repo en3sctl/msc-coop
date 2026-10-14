@@ -7,7 +7,7 @@ namespace MSCCoop;
 sealed class PlayerSync(ObjectRegistry registry)
 {
     const double SendInterval = 0.05;
-    const float CrouchHeightRatio = 0.8f;
+    const float CrouchDrop = 0.35f;
 
     readonly SnapshotBuffer[] buffers = new SnapshotBuffer[Protocol.MaxPlayers];
     readonly Avatar[] avatars = new Avatar[Protocol.MaxPlayers];
@@ -19,7 +19,7 @@ sealed class PlayerSync(ObjectRegistry registry)
     CharacterController controller;
     FsmGameObject pov;
     FsmString currentVehicle;
-    float standingHeight;
+    float standingEyes;
     Vector3 lastPosition;
     uint lastFrame;
     double lastSendTime = double.NaN;
@@ -58,7 +58,7 @@ sealed class PlayerSync(ObjectRegistry registry)
             return;
         player = go.transform;
         controller = go.GetComponent<CharacterController>();
-        standingHeight = controller.height;
+        standingEyes = 0;
         var globals = PlayMakerGlobals.Instance.Variables;
         pov = globals.FindFsmGameObject("POV");
         currentVehicle = globals.FindFsmString("PlayerCurrentVehicle");
@@ -177,22 +177,26 @@ sealed class PlayerSync(ObjectRegistry registry)
             avatars[slot]?.Look(pitches[slot], deltaTime);
     }
 
+    // Taken from where the camera looks, not from one transform's angles: which object in the
+    // player's hierarchy carries the vertical look is an implementation detail of the game.
     float Pitch()
     {
         if (pov.Value == null)
             return 0;
-        var x = pov.Value.transform.localEulerAngles.x;
-        return x > 180 ? x - 360 : x;
+        var forward = pov.Value.transform.forward;
+        return -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
     }
 
     PlayerFlags LocalFlags()
     {
-        var f = PlayerFlags.None;
-        if (controller.height < standingHeight * CrouchHeightRatio)
-            f |= PlayerFlags.Crouching;
         if (!string.IsNullOrEmpty(currentVehicle.Value))
-            f |= PlayerFlags.InVehicle;
-        return f;
+            return PlayerFlags.InVehicle;
+        if (pov.Value == null)
+            return PlayerFlags.None;
+        var feet = player.position.y + controller.center.y - controller.height * 0.5f;
+        var eyes = pov.Value.transform.position.y - feet;
+        standingEyes = Mathf.Max(standingEyes, eyes);
+        return eyes < standingEyes - CrouchDrop ? PlayerFlags.Crouching : PlayerFlags.None;
     }
 
     void Remove(byte slot)
