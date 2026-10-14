@@ -44,6 +44,9 @@ public enum MessageType : byte
     ObjectRelease = 41,
     ObjectOwner = 42,
     ObjectStates = 43,
+    PartAssemble = 44,
+    PartRemove = 45,
+    BoltStage = 46,
 }
 
 public enum RejectReason : byte

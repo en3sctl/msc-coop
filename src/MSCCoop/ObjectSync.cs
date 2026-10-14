@@ -34,6 +34,7 @@ sealed class ObjectSync
     readonly Ownership table = new();
     readonly List<Connection> pendingSnapshots = new();
     readonly List<KeyValuePair<uint, OwnerInfo>> released = new();
+    readonly List<NetObject> claimNextStep = new();
     Session session;
     PlayMakerFSM pickUp;
     FsmGameObject pickedObject;
@@ -104,6 +105,9 @@ sealed class ObjectSync
         if (!Active)
             return;
         fixedStep++;
+        for (var i = 0; i < claimNextStep.Count; i++)
+            Claim(claimNextStep[i], held: false);
+        claimNextStep.Clear();
         var hostTime = session.HostTime;
         var dt = Time.fixedDeltaTime;
 
@@ -145,13 +149,43 @@ sealed class ObjectSync
         SendStates(hostTime);
     }
 
+    public bool IsHeldLocally(NetObject obj) => obj.Owner.Owner == Local && obj.Owner.Held;
+
+    // Without a pose: an assembled part is placed by the assembly itself, not by its last world pose.
+    public void ReleaseWithoutPose(NetObject obj)
+    {
+        if (obj.Owner.Owner == Local)
+            Release(obj, withPose: false);
+    }
+
+    // Used before a remote assembly takes the part out of physics on this machine.
+    public void TakeOutOfProxy(NetObject obj)
+    {
+        EndProxy(obj);
+        if (!obj.IsVehicle && obj.Go.layer == HeldElsewhereLayer)
+            obj.Go.layer = obj.Layer;
+    }
+
+    // Assembly destroys a part's rigidbody and removal adds a new one.
+    public void RefreshBody(NetObject obj)
+    {
+        obj.Body = null;
+        obj.NextBodyCheck = 0;
+    }
+
+    public void ClaimNextStep(NetObject obj)
+    {
+        RefreshBody(obj);
+        claimNextStep.Add(obj);
+    }
+
     void TrackRest(NetObject obj, Rigidbody body)
     {
         if (body.IsSleeping() || body.velocity.sqrMagnitude < RestSpeed * RestSpeed
             && body.angularVelocity.sqrMagnitude < RestAngularSpeed * RestAngularSpeed)
         {
             if (++obj.RestSteps >= RestStepsToRelease)
-                Release(obj);
+                Release(obj, withPose: true);
         }
         else
         {
@@ -179,17 +213,15 @@ sealed class ObjectSync
         session.Send(session.HostConnection, Channel.Control);
     }
 
-    void Release(NetObject obj)
+    void Release(NetObject obj, bool withPose)
     {
         obj.RestSteps = 0;
-        var position = ToNet(obj.Go.transform.position);
-        var rotation = ToNet(obj.Go.transform.rotation);
         if (session.IsHost)
         {
             if (table.Release(obj.Id, Local, out var info))
             {
                 ApplyOwner(obj, info);
-                BroadcastOwner(obj.Id, info, obj);
+                BroadcastOwner(obj.Id, info, withPose ? obj : null);
             }
             return;
         }
@@ -198,7 +230,9 @@ sealed class ObjectSync
         obj.Pending = true;
         var w = session.BeginMessage(MessageType.ObjectRelease);
         w.WriteUInt(obj.Id);
-        ObjectMessages.WritePose(w, position, rotation);
+        w.WriteBool(withPose);
+        if (withPose)
+            ObjectMessages.WritePose(w, ToNet(obj.Go.transform.position), ToNet(obj.Go.transform.rotation));
         session.Send(session.HostConnection, Channel.Control);
     }
 
@@ -329,13 +363,18 @@ sealed class ObjectSync
     void HandleRelease(Connection from, BitReader r)
     {
         var id = r.ReadUInt();
-        ObjectMessages.ReadPose(r, out var position, out var rotation);
+        var hasPose = r.ReadBool();
+        Vec3 position = default;
+        Quat rotation = default;
+        if (hasPose)
+            ObjectMessages.ReadPose(r, out position, out rotation);
         var obj = registry.Find(id);
         if (r.Overflow || obj == null || !table.Release(id, from.Slot, out var info))
             return;
         ApplyOwner(obj, info);
-        SetPose(obj, position, rotation);
-        BroadcastOwner(id, info, obj);
+        if (hasPose)
+            SetPose(obj, position, rotation);
+        BroadcastOwner(id, info, hasPose ? obj : null);
     }
 
     void BroadcastOwner(uint id, OwnerInfo info, NetObject withPose)
