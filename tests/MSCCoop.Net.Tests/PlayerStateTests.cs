@@ -33,6 +33,22 @@ public class PlayerStateTests
     }
 
     [Fact]
+    public void VehicleFrameRoundTrips()
+    {
+        var buffer = new byte[64];
+        var w = new BitWriter(buffer);
+        new PlayerState { Slot = 1, Vehicle = 0xABCDEF01, Flags = PlayerFlags.InVehicle }.Write(w);
+        new PlayerState { Slot = 2 }.Write(w);
+
+        var r = new BitReader(buffer, w.Length);
+        Assert.Equal(0xABCDEF01u, PlayerState.Read(r).Vehicle);
+        var second = PlayerState.Read(r);
+        Assert.Equal(2, second.Slot);
+        Assert.Equal(0u, second.Vehicle);
+        Assert.False(r.Overflow);
+    }
+
+    [Fact]
     public void YawRotationMatchesUnityConvention()
     {
         var q = PlayerState.YawRotation(90);

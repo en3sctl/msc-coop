@@ -24,8 +24,8 @@ sealed class NetRunner : MonoBehaviour
     SimulatedTransport sim;
     Session session;
     GameFlow flow;
-    readonly PlayerSync players = new();
     readonly ObjectSync objects = new();
+    PlayerSync players;
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -38,6 +38,8 @@ sealed class NetRunner : MonoBehaviour
     public void Init(string version, string clientSaveDir)
     {
         modVersion = version;
+        players = new PlayerSync(objects.Registry);
+        players.Init();
         flow = new GameFlow(clientSaveDir);
         flow.OnLevelLoaded();
         gameBuild = ComputeGameBuild();
@@ -238,13 +240,13 @@ sealed class NetRunner : MonoBehaviour
             return "";
         status.Length = 0;
         status.Append("MSC Co-op ").Append(session.IsHost ? "host" : "client").Append(" | ").Append(session.State).AppendLine();
-        var players = session.Players;
-        for (var i = 0; i < players.Length; i++)
+        var slots = session.Players;
+        for (var i = 0; i < slots.Length; i++)
         {
-            if (players[i] == null)
+            if (slots[i] == null)
                 continue;
-            status.Append(i).Append("  ").Append(players[i].Name);
-            var c = FindConnection(players[i].Id);
+            status.Append(i).Append("  ").Append(slots[i].Name);
+            var c = FindConnection(slots[i].Id);
             if (c != null)
             {
                 status.Append("  rtt ").Append((int)(c.Clock.Rtt * 1000)).Append(" ms");

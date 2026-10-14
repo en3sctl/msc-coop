@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace MSCCoop;
 
-sealed class PlayerSync
+sealed class PlayerSync(ObjectRegistry registry)
 {
     const double SendInterval = 0.05;
     const float CrouchHeightRatio = 0.8f;
@@ -12,17 +12,19 @@ sealed class PlayerSync
     readonly SnapshotBuffer[] buffers = new SnapshotBuffer[Protocol.MaxPlayers];
     readonly Avatar[] avatars = new Avatar[Protocol.MaxPlayers];
     readonly PlayerFlags[] flags = new PlayerFlags[Protocol.MaxPlayers];
+    readonly uint[] frames = new uint[Protocol.MaxPlayers];
     Session session;
     Transform player;
     CharacterController controller;
     FsmGameObject pov;
     FsmString currentVehicle;
     float standingHeight;
-    Vector3 lastFeet;
+    Vector3 lastPosition;
+    uint lastFrame;
     double lastSendTime = double.NaN;
     double nextSend;
 
-    public PlayerSync()
+    public void Init()
     {
         for (var i = 0; i < buffers.Length; i++)
             buffers[i] = new SnapshotBuffer();
@@ -79,28 +81,53 @@ sealed class PlayerSync
                 continue;
             var buffer = buffers[slot];
             buffer.AdvanceDelay(deltaTime);
-            if (buffer.Sample(hostTime - buffer.Delay, out var m))
-                avatar.Apply(ToUnity(m.Position), ToUnity(m.Rotation), ToUnity(m.Velocity), flags[slot], camera);
+            if (!buffer.Sample(hostTime - buffer.Delay, out var m))
+                continue;
+            var position = ToUnity(m.Position);
+            var rotation = ToUnity(m.Rotation);
+            var vehicle = frames[slot] == 0 ? null : registry.Find(frames[slot]);
+            if (vehicle != null)
+            {
+                var frame = vehicle.Go.transform;
+                position = frame.TransformPoint(position);
+                rotation = frame.rotation * rotation;
+            }
+            avatar.Apply(position, rotation, ToUnity(m.Velocity), flags[slot], camera);
         }
     }
 
     void Send(double hostTime)
     {
         nextSend = hostTime + SendInterval;
-        var feet = player.position + controller.center - Vector3.up * (controller.height * 0.5f);
-        var velocity = double.IsNaN(lastSendTime) ? Vector3.zero : (feet - lastFeet) / (float)(hostTime - lastSendTime);
-        lastFeet = feet;
+        var position = player.position + controller.center - Vector3.up * (controller.height * 0.5f);
+        var yaw = player.eulerAngles.y;
+        var vehicle = player.parent == null ? null : registry.Find(player.root.gameObject);
+        uint frame = 0;
+        if (vehicle != null && vehicle.IsVehicle)
+        {
+            var t = vehicle.Go.transform;
+            position = t.InverseTransformPoint(position);
+            yaw = (Quaternion.Inverse(t.rotation) * player.rotation).eulerAngles.y;
+            frame = vehicle.Id;
+        }
+
+        var velocity = double.IsNaN(lastSendTime) || frame != lastFrame
+            ? Vector3.zero
+            : (position - lastPosition) / (float)(hostTime - lastSendTime);
+        lastPosition = position;
+        lastFrame = frame;
         lastSendTime = hostTime;
 
         var state = new PlayerState
         {
             Slot = session.LocalSlot,
             Time = hostTime,
-            Position = ToNet(feet),
+            Position = ToNet(position),
             Velocity = ToNet(velocity),
-            Yaw = player.eulerAngles.y,
+            Yaw = yaw,
             Pitch = Pitch(),
             Flags = LocalFlags(),
+            Vehicle = frame,
         };
         state.Write(session.BeginMessage(MessageType.PlayerState));
         session.Broadcast(Channel.State);
@@ -125,10 +152,12 @@ sealed class PlayerSync
         var info = session.Players[state.Slot];
         if (player == null || info == null)
             return;
-        if (avatars[state.Slot] == null)
+        if (avatars[state.Slot] == null || frames[state.Slot] != state.Vehicle)
         {
-            avatars[state.Slot] = Avatar.Create(state.Slot, info.Name);
+            if (avatars[state.Slot] == null)
+                avatars[state.Slot] = Avatar.Create(state.Slot, info.Name);
             buffers[state.Slot].Clear();
+            frames[state.Slot] = state.Vehicle;
         }
         buffers[state.Slot].Add(state.Time, session.HostTime, new MotionState
         {
