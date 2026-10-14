@@ -36,6 +36,7 @@ sealed class Avatar
     readonly Quaternion modelRotation;
     readonly int head;
     readonly int chest;
+    readonly int headPivot = -1;
     Quaternion facing = Quaternion.identity;
     float pitch;
     string playing;
@@ -62,6 +63,20 @@ sealed class Avatar
         // The head's parent is numbered per walker ("HeadPivot 1", "HeadPivot 2"); the head bone is not.
         head = System.Array.FindIndex(bones, b => b.name == "head");
         chest = System.Array.FindIndex(bones, b => b.name == "spine_upper");
+
+        // HeadPivot is the helper the NPC's look-at FSM turns towards the player. Whatever it was
+        // looking at when the walker was copied would otherwise stay baked into the avatar.
+        if (head >= 0)
+        {
+            var pivot = System.Array.IndexOf(bones, bones[head].parent);
+            if (pivot >= 0 && bones[pivot].name.StartsWith("HeadPivot"))
+            {
+                headPivot = pivot;
+                standingPose[pivot].Rotation = Quaternion.identity;
+                if (seatedPose != null)
+                    seatedPose[pivot].Rotation = Quaternion.identity;
+            }
+        }
     }
 
     public static Avatar Create(byte slot, string name)
@@ -116,8 +131,7 @@ sealed class Avatar
             nameTag.localScale = new Vector3(scale, scale, scale);
         }
 
-        // The game has no crouch animation for NPCs; the seated pose reads as a squat.
-        if ((flags & (PlayerFlags.InVehicle | PlayerFlags.Crouching)) != 0 && seatedPose != null)
+        if ((flags & PlayerFlags.InVehicle) != 0 && seatedPose != null)
         {
             Sit();
             ResetLookBones();
@@ -158,6 +172,7 @@ sealed class Avatar
     {
         ResetBone(head);
         ResetBone(chest);
+        ResetBone(headPivot);
     }
 
     void ResetBone(int i)
@@ -229,7 +244,10 @@ sealed class Avatar
     {
         var path = "";
         for (var current = t; current != root; current = current.parent)
-            path = current.name + "/" + path;
+        {
+            var name = current.name.StartsWith("HeadPivot") ? "HeadPivot" : current.name;
+            path = name + "/" + path;
+        }
         return path;
     }
 
