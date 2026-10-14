@@ -47,6 +47,8 @@ public enum MessageType : byte
     PartAssemble = 44,
     PartRemove = 45,
     BoltStage = 46,
+    WorldTime = 47,
+    WorldWeather = 48,
 }
 
 public enum RejectReason : byte

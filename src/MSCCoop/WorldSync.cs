@@ -1,0 +1,190 @@
+using HutongGames.PlayMaker;
+using MSCCoop.Net;
+using MSCLoader;
+using UnityEngine;
+
+namespace MSCCoop;
+
+// The host owns time of day and weather. Clients are moved onto the host's two-hour light block
+// through the same WAKEUP event the game uses after sleeping, and onto the host's weather through
+// the state the game uses when it loads weather from a save.
+sealed class WorldSync
+{
+    const double TimeInterval = 1;
+    const double WeatherInterval = 5;
+    const float MinuteTolerance = 1f;
+    const float CloudTolerance = 50f;
+    const string WeatherEvent = "MSCCOOP_WEATHER";
+
+    Session session;
+    bool ready;
+    double nextTime;
+    double nextWeather;
+
+    PlayMakerFSM color;
+    PlayMakerFSM clock;
+    FsmInt block;
+    FsmFloat blockMinutes;
+    FsmFloat clockMinutes;
+    FsmInt day;
+
+    PlayMakerFSM weather;
+    Transform clouds;
+    FsmFloat posX;
+    FsmFloat posZ;
+    FsmFloat rotation;
+    FsmInt weatherType;
+    FsmInt cloudId;
+    FsmFloat thunderForce;
+    FsmFloat offset;
+
+    public void Attach(Session newSession)
+    {
+        session = newSession;
+        session.MessageReceived += OnMessage;
+    }
+
+    public void Detach()
+    {
+        session = null;
+        ready = false;
+    }
+
+    public void OnLevelLoaded() => ready = false;
+
+    public void OnGameReady()
+    {
+        if (session == null)
+            return;
+        var sun = GameObject.Find("MAP/SUN/Pivot/SUN");
+        var cloudObject = GameObject.Find("MAP/CloudSystem/Clouds");
+        if (sun == null || cloudObject == null)
+        {
+            ModConsole.Error("Co-op: could not find the sun or the clouds, time and weather will not sync.");
+            return;
+        }
+
+        color = sun.GetPlayMaker("Color");
+        clock = sun.GetPlayMaker("Clock");
+        block = color.FsmVariables.FindFsmInt("Time");
+        blockMinutes = color.FsmVariables.FindFsmFloat("Minutes");
+        clockMinutes = clock.FsmVariables.FindFsmFloat("Minutes");
+        day = PlayMakerGlobals.Instance.Variables.FindFsmInt("GlobalDay");
+
+        weather = cloudObject.GetPlayMaker("Weather");
+        clouds = cloudObject.transform;
+        var v = weather.FsmVariables;
+        posX = v.FindFsmFloat("PosX");
+        posZ = v.FindFsmFloat("PosZ");
+        rotation = v.FindFsmFloat("Rotation");
+        weatherType = v.FindFsmInt("WeatherType");
+        cloudId = v.FindFsmInt("WeatherCloudID");
+        thunderForce = v.FindFsmFloat("ThunderForce");
+        offset = v.FindFsmFloat("Offset");
+        if (block == null || blockMinutes == null || clockMinutes == null || day == null || posX == null || posZ == null
+            || rotation == null || weatherType == null || cloudId == null || thunderForce == null || offset == null)
+        {
+            ModConsole.Error("Co-op: the sun or weather logic has changed, time and weather will not sync.");
+            return;
+        }
+        weather.AddGlobalTransition(WeatherEvent, "Set cloud");
+        // The host announces a new weather roll as soon as it happens instead of at the next interval.
+        weather.FsmInject("Move clouds", () => nextWeather = 0, index: 0);
+        ready = true;
+    }
+
+    public void Update()
+    {
+        if (!ready || session == null || !session.IsHost || session.State != SessionState.Connected)
+            return;
+        var now = session.Now;
+        if (now >= nextTime)
+        {
+            nextTime = now + TimeInterval;
+            var w = session.BeginMessage(MessageType.WorldTime);
+            w.WriteUInt((uint)day.Value);
+            w.WriteByte((byte)block.Value);
+            w.WriteFloat(blockMinutes.Value);
+            w.WriteFloat(clockMinutes.Value);
+            session.Broadcast(Channel.Control);
+        }
+        if (now >= nextWeather)
+        {
+            nextWeather = now + WeatherInterval;
+            var w = session.BeginMessage(MessageType.WorldWeather);
+            w.WriteFloat(posX.Value);
+            w.WriteFloat(posZ.Value);
+            w.WriteFloat(rotation.Value);
+            w.WriteByte((byte)weatherType.Value);
+            w.WriteByte((byte)cloudId.Value);
+            w.WriteFloat(thunderForce.Value);
+            w.WriteFloat(offset.Value);
+            session.Broadcast(Channel.Control);
+        }
+    }
+
+    void OnMessage(Connection from, MessageType type, BitReader r)
+    {
+        if (session.IsHost)
+            return;
+        switch (type)
+        {
+            case MessageType.WorldTime:
+                var hostDay = (int)r.ReadUInt();
+                var hostBlock = r.ReadByte();
+                var hostBlockMinutes = r.ReadFloat();
+                var hostClockMinutes = r.ReadFloat();
+                if (!r.Overflow && ready)
+                    ApplyTime(hostDay, hostBlock, hostBlockMinutes, hostClockMinutes);
+                break;
+            case MessageType.WorldWeather:
+                var x = r.ReadFloat();
+                var z = r.ReadFloat();
+                var rot = r.ReadFloat();
+                var kind = r.ReadByte();
+                var cloud = r.ReadByte();
+                var thunder = r.ReadFloat();
+                var off = r.ReadFloat();
+                if (!r.Overflow && ready)
+                    ApplyWeather(x, z, rot, kind, cloud, thunder, off);
+                break;
+        }
+    }
+
+    void ApplyTime(int hostDay, int hostBlock, float hostBlockMinutes, float hostClockMinutes)
+    {
+        day.Value = hostDay;
+        if (block.Value != hostBlock)
+        {
+            block.Value = hostBlock;
+            color.SendEvent("WAKEUP");
+            clock.SendEvent("WAKEUP");
+        }
+        if (Mathf.Abs(blockMinutes.Value - hostBlockMinutes) > MinuteTolerance)
+        {
+            blockMinutes.Value = hostBlockMinutes;
+            clockMinutes.Value = hostClockMinutes;
+        }
+    }
+
+    void ApplyWeather(float x, float z, float rot, int kind, int cloud, float thunder, float off)
+    {
+        var sameWeather = weatherType.Value == kind && cloudId.Value == cloud;
+        if (sameWeather && Mathf.Abs(posX.Value - x) < CloudTolerance)
+            return;
+
+        posX.Value = x;
+        posZ.Value = z;
+        offset.Value = off;
+        if (sameWeather)
+            return;
+
+        rotation.Value = rot;
+        weatherType.Value = kind;
+        cloudId.Value = cloud;
+        thunderForce.Value = thunder;
+        clouds.position = new Vector3(x, clouds.position.y, z);
+        clouds.rotation = Quaternion.Euler(0, rot, 0);
+        weather.SendEvent(WeatherEvent);
+    }
+}

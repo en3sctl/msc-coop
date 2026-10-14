@@ -27,6 +27,7 @@ sealed class NetRunner : MonoBehaviour
     readonly ObjectSync objects = new();
     PlayerSync players;
     FsmSync fsms;
+    readonly WorldSync world = new();
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -136,6 +137,7 @@ sealed class NetRunner : MonoBehaviour
         players.Attach(session);
         objects.Attach(session);
         fsms.Attach(session);
+        world.Attach(session);
         session.PlayerJoined += p => ModConsole.Print("Co-op: " + p.Name + " joined");
         session.PlayerLeft += p => ModConsole.Print("Co-op: " + p.Name + " left");
         session.Ended += OnEnded;
@@ -160,6 +162,7 @@ sealed class NetRunner : MonoBehaviour
         players.Detach();
         objects.Detach();
         fsms.Detach();
+        world.Detach();
         var text = reason == EndReason.Rejected ? "rejected (" + session.LastRejectReason + ")" : reason.ToString();
         ModConsole.Print("Co-op: session ended, " + text);
         lobby?.Leave();
@@ -209,6 +212,7 @@ sealed class NetRunner : MonoBehaviour
         flow.Update();
         players.Update(Time.deltaTime);
         objects.Update();
+        world.Update();
         if (overlay && Time.unscaledTime >= nextStatus)
         {
             nextStatus = Time.unscaledTime + StatusInterval;
@@ -220,6 +224,7 @@ sealed class NetRunner : MonoBehaviour
     {
         objects.OnGameReady();
         fsms.OnGameReady();
+        world.OnGameReady();
         flow.OnGameReady();
         players.OnGameReady();
     }
@@ -233,6 +238,7 @@ sealed class NetRunner : MonoBehaviour
         flow.OnLevelLoaded();
         players.OnLevelLoaded();
         objects.OnLevelLoaded();
+        world.OnLevelLoaded();
     }
 
     void OnGUI()
