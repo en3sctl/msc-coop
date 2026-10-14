@@ -42,6 +42,7 @@ sealed class NetObject(uint id, GameObject go)
     public int RestSteps;
     public Vector3 LastSentPosition;
     public double LastSentTime = double.NaN;
+    public float LastHeldLocally = float.NegativeInfinity;
 }
 
 // Identifies every synced rigidbody the same way on every machine. Scene objects are keyed by their
@@ -49,7 +50,8 @@ sealed class NetObject(uint id, GameObject go)
 // objects the game spawns while loading the save are keyed by the item id the save gave them.
 sealed class ObjectRegistry
 {
-    static readonly string[] ExcludedRoots = { "PLAYER", "TRAFFIC", "NPC_CARS", "HUMANS", "RALLY" };
+    // Moved by their own logic on every machine, so each machine would keep claiming them.
+    static readonly string[] ExcludedRoots = { "PLAYER", "TRAFFIC", "NPC_CARS", "HUMANS", "RALLY", "TRAIN" };
     public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use", "Data" };
 
     readonly List<KeyValuePair<string, GameObject>> awake = new();

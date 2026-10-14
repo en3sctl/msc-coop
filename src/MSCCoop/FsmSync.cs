@@ -239,7 +239,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             return;
         // The save also assembles parts while loading; only an assembly from the local hand is news.
         var part = registry.Find(partVar.Value);
-        if (part == null || !objects.IsHeldLocally(part))
+        if (part == null || !objects.WasRecentlyHeldLocally(part))
             return;
 
         var w = session.BeginMessage(MessageType.PartAssemble);

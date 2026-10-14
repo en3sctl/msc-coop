@@ -259,7 +259,12 @@ sealed class ObjectSync
             wheel.steering = v.Steering;
     }
 
-    public bool IsHeldLocally(NetObject obj) => obj.Owner.Owner == Local && obj.Owner.Held;
+    const float RecentlyHeldSeconds = 3f;
+
+    // The click that assembles a part also drops it from the hand, and the assembly state only runs
+    // after a short wait, so by then the part is no longer held.
+    public bool WasRecentlyHeldLocally(NetObject obj) =>
+        obj.Owner.Owner == Local && obj.Owner.Held || Time.time - obj.LastHeldLocally < RecentlyHeldSeconds;
 
     // Without a pose: an assembled part is placed by the assembly itself, not by its last world pose.
     public void ReleaseWithoutPose(NetObject obj)
@@ -710,8 +715,10 @@ sealed class ObjectSync
         var obj = registry.Find(pickedObject.Value);
         if (Diagnostics.Logging)
             Diagnostics.Log("pickup " + (pickedObject.Value == null ? "null" : pickedObject.Value.name) + (obj == null ? " UNREGISTERED" : " " + obj.Key));
-        if (obj != null)
-            Claim(obj, held: true);
+        if (obj == null)
+            return;
+        obj.LastHeldLocally = Time.time;
+        Claim(obj, held: true);
     }
 
     void OnLocalDrop()
@@ -721,7 +728,10 @@ sealed class ObjectSync
         var obj = registry.Find(pickedObject.Value);
         if (Diagnostics.Logging)
             Diagnostics.Log("drop " + (pickedObject.Value == null ? "null" : pickedObject.Value.name) + (obj == null ? " UNREGISTERED" : " " + obj.Key));
-        if (obj != null && obj.Owner.Owner == Local)
+        if (obj == null)
+            return;
+        obj.LastHeldLocally = Time.time;
+        if (obj.Owner.Owner == Local)
             Claim(obj, held: false);
     }
 
