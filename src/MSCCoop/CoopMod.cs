@@ -1,6 +1,5 @@
 using System;
 using System.Globalization;
-using System.IO;
 using System.Net;
 using MSCLoader;
 using UnityEngine;
@@ -30,7 +29,7 @@ public class CoopMod : Mod
         var go = new GameObject("MSCCoop");
         UnityEngine.Object.DontDestroyOnLoad(go);
         runner = go.AddComponent<NetRunner>();
-        runner.Init(Version, Path.Combine(ModLoader.GetModSettingsFolder(this), "client-save"));
+        runner.Init(Version, ModLoader.GetModSettingsFolder(this));
         ConsoleCommand.Add(new CoopCommand(runner));
     }
 }
@@ -41,7 +40,7 @@ class CoopCommand(NetRunner runner) : ConsoleCommand
 
     public override string Help =>
         "coop host | coop host lan [port] | coop join lan IP [port] | coop invite | coop leave | " +
-        "coop sim LATENCY_MS JITTER_MS LOSS_PERCENT | coop overlay";
+        "coop sim LATENCY_MS JITTER_MS LOSS_PERCENT | coop overlay | coop dump | coop log on|off";
 
     public override void Run(string[] rawArgs)
     {
@@ -70,6 +69,12 @@ class CoopCommand(NetRunner runner) : ConsoleCommand
                 break;
             case "overlay":
                 runner.ToggleOverlay();
+                break;
+            case "dump":
+                runner.Dump();
+                break;
+            case "log" when args.Length > 1:
+                runner.SetLogging(args[1] == "on");
                 break;
             default:
                 ModConsole.Print(Help);

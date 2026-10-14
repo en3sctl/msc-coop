@@ -26,6 +26,7 @@ sealed class NetObject(uint id, GameObject go)
 {
     public readonly uint Id = id;
     public readonly GameObject Go = go;
+    public string Key;
     public readonly int Layer = go.layer;
     public readonly VehicleParts Vehicle = go.GetComponent<CarDynamics>() != null ? new VehicleParts(go) : null;
     public bool IsVehicle => Vehicle != null;
@@ -57,6 +58,7 @@ sealed class ObjectRegistry
     readonly Dictionary<GameObject, NetObject> byObject = new();
     readonly Dictionary<uint, PlayMakerFSM> fsmsById = new();
     readonly Dictionary<PlayMakerFSM, uint> idsByFsm = new();
+    readonly Dictionary<PlayMakerFSM, string> keysByFsm = new();
     int boltsLayer;
 
     public readonly List<NetObject> Objects = new();
@@ -72,6 +74,7 @@ sealed class ObjectRegistry
         byObject.Clear();
         fsmsById.Clear();
         idsByFsm.Clear();
+        keysByFsm.Clear();
         Objects.Clear();
         Fsms.Clear();
         Hash = 0;
@@ -82,6 +85,8 @@ sealed class ObjectRegistry
     public PlayMakerFSM FindFsm(uint id) => fsmsById.TryGetValue(id, out var f) ? f : null;
 
     public bool TryGetFsmId(PlayMakerFSM fsm, out uint id) => idsByFsm.TryGetValue(fsm, out id);
+
+    public string FsmKey(PlayMakerFSM fsm) => keysByFsm.TryGetValue(fsm, out var key) ? key : "";
 
     public NetObject Find(GameObject go) => go != null && byObject.TryGetValue(go, out var o) ? o : null;
 
@@ -143,7 +148,7 @@ sealed class ObjectRegistry
                 dropped++;
                 continue;
             }
-            var obj = new NetObject(id, e.Value);
+            var obj = new NetObject(id, e.Value) { Key = e.Key };
             Objects.Add(obj);
             byId[id] = obj;
             byObject[e.Value] = obj;
@@ -239,6 +244,7 @@ sealed class ObjectRegistry
                 continue;
             fsmsById[id] = e.Value;
             idsByFsm[e.Value] = id;
+            keysByFsm[e.Value] = e.Key;
             Fsms.Add(e.Value);
             hash = Fnv.Hash32(e.Key, hash);
         }

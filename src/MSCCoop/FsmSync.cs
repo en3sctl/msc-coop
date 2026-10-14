@@ -169,6 +169,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteByte((byte)index);
         session.Broadcast(Channel.Control);
         Sent++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
     }
 
     void ApplyToggle(uint id, int index)
@@ -176,7 +178,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var fsm = registry.FindFsm(id);
         if (fsm == null || !toggles.TryGetValue(fsm, out var pair) || index >= pair.Length)
         {
-            Unknown++;
+            MarkUnknown("ApplyToggle", id);
             return;
         }
         // Replaying the state the door is already in would snap its animation back and play it again.
@@ -216,6 +218,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteByte((byte)stateIndex);
         session.Broadcast(Channel.Control);
         Sent++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
     }
 
     void ApplyTurnStep(uint id, int stateIndex)
@@ -223,7 +227,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var fsm = registry.FindFsm(id);
         if (fsm == null || stateIndex >= fsm.FsmStates.Length)
         {
-            Unknown++;
+            MarkUnknown("ApplyTurnStep", id);
             return;
         }
         Apply(fsm, TurnEvent + fsm.FsmStates[stateIndex].Name);
@@ -244,6 +248,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteUInt(part.Id);
         session.Broadcast(Channel.Control);
         Sent++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
         objects.ReleaseWithoutPose(part);
         objects.RefreshBody(part);
     }
@@ -256,6 +262,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         session.BeginMessage(MessageType.PartRemove).WriteUInt(id);
         session.Broadcast(Channel.Control);
         Sent++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
         var part = registry.Find(fsm.gameObject);
         if (part != null)
             objects.ClaimNextStep(part);
@@ -278,6 +286,8 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteFloat(bolt.Tightness == null ? 0 : bolt.Tightness.Value);
         session.Broadcast(Channel.Control);
         Sent++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm sent " + registry.FsmKey(fsm));
     }
 
     void OnMessage(Connection from, MessageType type, BitReader r)
@@ -367,7 +377,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var part = registry.Find(partId);
         if (fsm == null || part == null)
         {
-            Unknown++;
+            MarkUnknown("ApplyAssemble", assemblyId);
             return;
         }
         objects.TakeOutOfProxy(part);
@@ -381,7 +391,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var fsm = registry.FindFsm(removalId);
         if (fsm == null)
         {
-            Unknown++;
+            MarkUnknown("ApplyRemove", removalId);
             return;
         }
         Apply(fsm, RemoveEvent);
@@ -395,7 +405,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var fsm = registry.FindFsm(boltId);
         if (fsm == null || !bolts.TryGetValue(fsm, out var bolt))
         {
-            Unknown++;
+            MarkUnknown("ApplyStage", boltId);
             return;
         }
         bolt.Stage.Value = stage;
@@ -404,9 +414,18 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             bolt.Tightness.Value = tightness;
     }
 
+    void MarkUnknown(string what, uint id)
+    {
+        Unknown++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm unknown " + what + " " + id.ToString("x8"));
+    }
+
     void Apply(PlayMakerFSM fsm, string eventName)
     {
         Applied++;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("fsm apply " + registry.FsmKey(fsm) + " " + eventName + " from " + fsm.ActiveStateName);
         applying = true;
         try
         {

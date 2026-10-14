@@ -36,6 +36,12 @@ sealed class SharedValueSync(ObjectRegistry registry)
     double nextSend;
     double nextFull;
 
+    public void Dump(System.IO.TextWriter w)
+    {
+        foreach (var s in values)
+            w.WriteLine("S\t" + s.Id.ToString("x8") + "\t" + s.Value.Name + "\t" + s.Value.Value.ToString("0.0000") + "\tlast=" + s.Last.ToString("0.0000"));
+    }
+
     public void Attach(Session newSession)
     {
         session = newSession;

@@ -305,6 +305,8 @@ sealed class ObjectSync
 
     void Claim(NetObject obj, bool held)
     {
+        if (Diagnostics.Logging)
+            Diagnostics.Log("claim " + obj.Id.ToString("x8") + " " + obj.Key + " held=" + held);
         obj.RestSteps = 0;
         if (session.IsHost)
         {
@@ -325,6 +327,8 @@ sealed class ObjectSync
 
     void Release(NetObject obj, bool withPose)
     {
+        if (Diagnostics.Logging)
+            Diagnostics.Log("release " + obj.Id.ToString("x8") + " " + obj.Key + " pose=" + withPose);
         obj.RestSteps = 0;
         if (session.IsHost)
         {
@@ -519,6 +523,8 @@ sealed class ObjectSync
 
     void ApplyOwner(NetObject obj, OwnerInfo info)
     {
+        if (Diagnostics.Logging)
+            Diagnostics.Log("owner " + obj.Id.ToString("x8") + " " + obj.Key + " -> " + info.Owner + " seq=" + info.Seq + " held=" + info.Held);
         obj.Owner = info;
         obj.Pending = false;
         obj.RestSteps = 0;
@@ -614,6 +620,8 @@ sealed class ObjectSync
 
     void ReadSnapshot(BitReader r)
     {
+        if (Diagnostics.Logging)
+            Diagnostics.Log("snapshot chunk");
         var last = r.ReadBool();
         var count = r.ReadUShort();
         for (var i = 0; i < count; i++)
@@ -700,6 +708,8 @@ sealed class ObjectSync
         if (!Active)
             return;
         var obj = registry.Find(pickedObject.Value);
+        if (Diagnostics.Logging)
+            Diagnostics.Log("pickup " + (pickedObject.Value == null ? "null" : pickedObject.Value.name) + (obj == null ? " UNREGISTERED" : " " + obj.Key));
         if (obj != null)
             Claim(obj, held: true);
     }
@@ -709,6 +719,8 @@ sealed class ObjectSync
         if (!Active)
             return;
         var obj = registry.Find(pickedObject.Value);
+        if (Diagnostics.Logging)
+            Diagnostics.Log("drop " + (pickedObject.Value == null ? "null" : pickedObject.Value.name) + (obj == null ? " UNREGISTERED" : " " + obj.Key));
         if (obj != null && obj.Owner.Owner == Local)
             Claim(obj, held: false);
     }

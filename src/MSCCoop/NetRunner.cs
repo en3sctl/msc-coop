@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Net;
 using System.Text;
 using MSCCoop.Net;
@@ -14,6 +15,8 @@ sealed class NetRunner : MonoBehaviour
     const float StatusInterval = 0.25f;
 
     static bool launchOptionsApplied;
+
+    string dumpDir;
 
     readonly Stopwatch clock = Stopwatch.StartNew();
     readonly StringBuilder status = new();
@@ -41,9 +44,11 @@ sealed class NetRunner : MonoBehaviour
 
     public bool Active => session != null && session.State != SessionState.Idle;
 
-    public void Init(string version, string clientSaveDir)
+    public void Init(string version, string dataDir)
     {
         modVersion = version;
+        dumpDir = Path.Combine(dataDir, "dumps");
+        var clientSaveDir = Path.Combine(dataDir, "client-save");
         players = new PlayerSync(objects.Registry);
         players.Init();
         fsms = new FsmSync(objects.Registry, objects);
@@ -135,6 +140,14 @@ sealed class NetRunner : MonoBehaviour
     }
 
     public void ToggleOverlay() => overlay = !overlay;
+
+    public void Dump() => ModConsole.Print("Co-op: state written to " + Diagnostics.Write(dumpDir, session, objects.Registry, shared));
+
+    public void SetLogging(bool on)
+    {
+        Diagnostics.Logging = on;
+        ModConsole.Print("Co-op: event log " + (on ? "on" : "off") + ".");
+    }
 
     void StartSession(ITransport transport, bool host, ulong hostId)
     {
