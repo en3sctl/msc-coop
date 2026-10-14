@@ -15,7 +15,11 @@ sealed class Avatar
     const float WalkThreshold = 0.25f;
     const float CrossFade = 0.2f;
     const float NameTagHeight = 2.05f;
+    const float NameTagAboveEyes = 0.4f;
     const string SkeletonName = "skeleton";
+    const float NameTagReferenceDistance = 8f;
+    const float LookSmoothing = 12f;
+    const float ChestShareOfPitch = 0.4f;
 
     // Traffic drivers share the walkers' rig but have no animation: their skeleton is posed seated.
     const string SeatedTemplate = "VehiclesHighway/FITTAN/LOD/Passengers/Driver/skeleton";
@@ -30,6 +34,10 @@ sealed class Avatar
     readonly Pose[] seatedPose;
     readonly Vector3 modelOffset;
     readonly Quaternion modelRotation;
+    readonly int head;
+    readonly int chest;
+    Quaternion facing = Quaternion.identity;
+    float pitch;
     string playing;
     bool seated;
 
@@ -51,6 +59,8 @@ sealed class Avatar
         this.bones = bones;
         this.standingPose = standingPose;
         this.seatedPose = seatedPose;
+        head = System.Array.FindIndex(bones, b => b.name == "HeadPivot");
+        chest = System.Array.FindIndex(bones, b => b.name == "spine_upper");
     }
 
     public static Avatar Create(byte slot, string name)
@@ -93,19 +103,31 @@ sealed class Avatar
 
     public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Transform camera)
     {
+        var inVehicle = (flags & PlayerFlags.InVehicle) != 0;
+        facing = rotation;
         root.transform.position = position + rotation * modelOffset;
         root.transform.rotation = rotation * modelRotation;
-        nameTag.position = position + Vector3.up * NameTagHeight;
+        nameTag.position = position + Vector3.up * (inVehicle ? NameTagAboveEyes : NameTagHeight);
         if (camera != null)
+        {
             nameTag.rotation = camera.rotation;
+            var scale = Mathf.Clamp(Vector3.Distance(camera.position, nameTag.position) / NameTagReferenceDistance, 0.2f, 2f);
+            nameTag.localScale = new Vector3(scale, scale, scale);
+        }
 
-        if ((flags & PlayerFlags.InVehicle) != 0 && seatedPose != null)
+        // The game has no crouch animation for NPCs; the seated pose reads as a squat.
+        if ((flags & (PlayerFlags.InVehicle | PlayerFlags.Crouching)) != 0 && seatedPose != null)
         {
             Sit();
+            ResetLookBones();
+            // In a vehicle the position is the player's eyes, so the head is put there.
+            if (inVehicle && head >= 0)
+                root.transform.position += position - bones[head].position;
             return;
         }
         if (seated)
             Stand();
+        ResetLookBones();
 
         var speed = new Vector2(velocity.x, velocity.z).magnitude;
         if (speed > WalkThreshold)
@@ -117,7 +139,32 @@ sealed class Avatar
             Play(StandClip);
     }
 
+    // Runs after animation has posed the skeleton; ResetLookBones keeps the additive turn from
+    // piling up on bones the current clip does not key.
+    public void Look(float targetPitch, float deltaTime)
+    {
+        pitch = Mathf.Lerp(pitch, targetPitch, Mathf.Min(1f, deltaTime * LookSmoothing));
+        var right = facing * Vector3.right;
+        if (chest >= 0)
+            bones[chest].rotation = Quaternion.AngleAxis(pitch * ChestShareOfPitch, right) * bones[chest].rotation;
+        if (head >= 0)
+            bones[head].rotation = Quaternion.AngleAxis(pitch * (1 - ChestShareOfPitch), right) * bones[head].rotation;
+    }
+
     public void Destroy() => Object.Destroy(root);
+
+    void ResetLookBones()
+    {
+        ResetBone(head);
+        ResetBone(chest);
+    }
+
+    void ResetBone(int i)
+    {
+        var pose = seated ? seatedPose : standingPose;
+        if (i >= 0 && pose[i].Valid)
+            bones[i].localRotation = pose[i].Rotation;
+    }
 
     void Sit()
     {

@@ -13,6 +13,7 @@ sealed class PlayerSync(ObjectRegistry registry)
     readonly Avatar[] avatars = new Avatar[Protocol.MaxPlayers];
     readonly PlayerFlags[] flags = new PlayerFlags[Protocol.MaxPlayers];
     readonly uint[] frames = new uint[Protocol.MaxPlayers];
+    readonly float[] pitches = new float[Protocol.MaxPlayers];
     Session session;
     Transform player;
     CharacterController controller;
@@ -105,8 +106,9 @@ sealed class PlayerSync(ObjectRegistry registry)
         uint frame = 0;
         if (vehicle != null && vehicle.IsVehicle)
         {
+            // Seats differ per vehicle and PLAYER's feet are meaningless while seated; the eyes are not.
             var t = vehicle.Go.transform;
-            position = t.InverseTransformPoint(position);
+            position = t.InverseTransformPoint(pov.Value != null ? pov.Value.transform.position : position);
             yaw = (Quaternion.Inverse(t.rotation) * player.rotation).eulerAngles.y;
             frame = vehicle.Id;
         }
@@ -166,6 +168,13 @@ sealed class PlayerSync(ObjectRegistry registry)
             Rotation = PlayerState.YawRotation(state.Yaw),
         });
         flags[state.Slot] = state.Flags;
+        pitches[state.Slot] = state.Pitch;
+    }
+
+    public void LateUpdate(float deltaTime)
+    {
+        for (var slot = 0; slot < avatars.Length; slot++)
+            avatars[slot]?.Look(pitches[slot], deltaTime);
     }
 
     float Pitch()

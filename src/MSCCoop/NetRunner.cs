@@ -226,6 +226,8 @@ sealed class NetRunner : MonoBehaviour
 
     void FixedUpdate() => objects.FixedUpdate();
 
+    void LateUpdate() => players.LateUpdate(Time.deltaTime);
+
     void OnLevelWasLoaded(int level)
     {
         flow.OnLevelLoaded();
