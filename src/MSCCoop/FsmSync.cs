@@ -16,6 +16,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     const string RemoveEvent = "MSCCOOP_REMOVE";
     const string StageEvent = "MSCCOOP_STAGE";
     const string ToggleEvent = "MSCCOOP_TOGGLE_";
+    const string TurnEvent = "MSCCOOP_TURN_";
 
     // Doors, hoods, lids and similar: the game plays an animation in these states, so entering the
     // same state on every machine reproduces the movement and the sound.
@@ -128,7 +129,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var partVar = fsm.FsmVariables.FindFsmGameObject("PartAssembled");
         if (stage == null || partVar == null || fsm.GetState("Get scroll 2") == null || fsm.GetState("Stages 2") == null)
         {
-            unsupported++;
+            HookTurns(fsm);
             return;
         }
         var part = partVar.Value;
@@ -183,6 +184,49 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             return;
         toggleState[fsm] = index;
         Apply(fsm, ToggleEvent + index);
+    }
+
+    // Adjusting screws (carburettor, valves, steering wheel bolts) and caps step a value in a Screw or
+    // Unscrew state. Each step is deterministic, so replaying the same states in order on every
+    // machine over the reliable channel keeps the values equal.
+    void HookTurns(PlayMakerFSM fsm)
+    {
+        var states = fsm.FsmStates;
+        var hooked = false;
+        for (var i = 0; i < states.Length; i++)
+        {
+            var name = states[i].Name;
+            if (!name.StartsWith("Screw") && !name.StartsWith("Unscrew"))
+                continue;
+            var index = i;
+            fsm.FsmInject(name, () => OnLocalTurnStep(fsm, index), index: 0);
+            fsm.AddSharedGlobalTransition(TurnEvent + name, name);
+            hooked = true;
+        }
+        if (!hooked)
+            unsupported++;
+    }
+
+    void OnLocalTurnStep(PlayMakerFSM fsm, int stateIndex)
+    {
+        if (applying || !Active || !registry.TryGetFsmId(fsm, out var id))
+            return;
+        var w = session.BeginMessage(MessageType.ScrewTurn);
+        w.WriteUInt(id);
+        w.WriteByte((byte)stateIndex);
+        session.Broadcast(Channel.Control);
+        Sent++;
+    }
+
+    void ApplyTurnStep(uint id, int stateIndex)
+    {
+        var fsm = registry.FindFsm(id);
+        if (fsm == null || stateIndex >= fsm.FsmStates.Length)
+        {
+            Unknown++;
+            return;
+        }
+        Apply(fsm, TurnEvent + fsm.FsmStates[stateIndex].Name);
     }
 
     void OnLocalAssemble(PlayMakerFSM fsm, FsmGameObject partVar, byte variant)
@@ -266,6 +310,20 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                     session.Broadcast(Channel.Control, from);
                 }
                 ApplyRemove(removalId);
+                break;
+            case MessageType.ScrewTurn:
+                var turnId = r.ReadUInt();
+                var turnState = r.ReadByte();
+                if (r.Overflow)
+                    return;
+                if (ShouldRelay)
+                {
+                    var w = session.BeginMessage(type);
+                    w.WriteUInt(turnId);
+                    w.WriteByte(turnState);
+                    session.Broadcast(Channel.Control, from);
+                }
+                ApplyTurnStep(turnId, turnState);
                 break;
             case MessageType.ToggleState:
                 var toggleId = r.ReadUInt();
