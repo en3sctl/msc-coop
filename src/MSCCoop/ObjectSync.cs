@@ -363,7 +363,7 @@ sealed class ObjectSync
             if (obj.Owner.Owner != Local || obj.Proxy)
                 continue;
             var body = Body(obj);
-            if (body == null || body.isKinematic || !obj.Owner.Held && body.IsSleeping())
+            if (body == null || !obj.Owner.Held && (body.isKinematic || body.IsSleeping()))
                 continue;
 
             if (w != null && w.BitPosition + ObjectMessages.MaxStateBits > Protocol.MaxUnreliableBytes * 8)
@@ -381,13 +381,22 @@ sealed class ObjectSync
                 w = BeginStates(hostTime, Local, out countPosition);
                 count = 0;
             }
+            // The game carries some held objects kinematically, the engine block for one, so their
+            // pose comes from the transform and their velocity from the previous send.
+            var carried = body.isKinematic;
+            var position = carried ? obj.Go.transform.position : body.position;
+            var velocity = carried
+                ? double.IsNaN(obj.LastSentTime) ? Vector3.zero : (position - obj.LastSentPosition) / (float)(hostTime - obj.LastSentTime)
+                : body.velocity;
+            obj.LastSentPosition = position;
+            obj.LastSentTime = hostTime;
             new ObjectState
             {
                 Id = obj.Id,
-                Position = ToNet(body.position),
-                Rotation = ToNet(body.rotation),
-                Velocity = ToNet(body.velocity),
-                AngularVelocity = ToNet(body.angularVelocity),
+                Position = ToNet(position),
+                Rotation = ToNet(carried ? obj.Go.transform.rotation : body.rotation),
+                Velocity = ToNet(velocity),
+                AngularVelocity = ToNet(carried ? Vector3.zero : body.angularVelocity),
             }.Write(w);
             count++;
         }
@@ -798,12 +807,16 @@ sealed class ObjectSync
         body.interpolation = obj.GameInterpolation;
     }
 
-    static void SetPose(NetObject obj, Vec3 position, Quat rotation)
+    // A part without a rigidbody is bolted onto something and placed by its parent; a world pose
+    // from another machine would shift it relative to that parent.
+    void SetPose(NetObject obj, Vec3 position, Quat rotation)
     {
+        var body = Body(obj);
+        if (body == null)
+            return;
         obj.Go.transform.position = ToUnity(position);
         obj.Go.transform.rotation = ToUnity(rotation);
-        var body = obj.Body;
-        if (body == null || body.isKinematic)
+        if (body.isKinematic)
             return;
         body.velocity = Vector3.zero;
         body.angularVelocity = Vector3.zero;

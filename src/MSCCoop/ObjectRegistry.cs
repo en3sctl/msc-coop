@@ -39,6 +39,8 @@ sealed class NetObject(uint id, GameObject go)
     public RigidbodyInterpolation GameInterpolation;
     public SnapshotBuffer Buffer;
     public int RestSteps;
+    public Vector3 LastSentPosition;
+    public double LastSentTime = double.NaN;
 }
 
 // Identifies every synced rigidbody the same way on every machine. Scene objects are keyed by their
