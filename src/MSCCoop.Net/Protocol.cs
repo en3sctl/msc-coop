@@ -53,6 +53,8 @@ public enum MessageType : byte
     MoneyDelta = 50,
     MoneyTotal = 51,
     ToggleState = 52,
+    SharedDeltas = 53,
+    SharedTotals = 54,
 }
 
 public enum RejectReason : byte

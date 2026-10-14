@@ -78,7 +78,9 @@ sealed class MoneySync
         }
         else if (type == MessageType.MoneyTotal && !session.IsHost)
         {
-            money.Value = value;
+            // A local change not yet reported stays on top of the host's total and goes out next frame.
+            var unsent = money.Value - last;
+            money.Value = value + unsent;
             last = value;
         }
     }

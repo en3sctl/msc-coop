@@ -31,6 +31,7 @@ sealed class NetRunner : MonoBehaviour
     FsmSync fsms;
     readonly WorldSync world = new();
     readonly MoneySync money = new();
+    SharedValueSync shared;
     double simLatency, simJitter, simLoss;
     string statusText = "";
     float nextStatus;
@@ -46,6 +47,7 @@ sealed class NetRunner : MonoBehaviour
         players = new PlayerSync(objects.Registry);
         players.Init();
         fsms = new FsmSync(objects.Registry, objects);
+        shared = new SharedValueSync(objects.Registry);
         flow = new GameFlow(clientSaveDir);
         flow.OnLevelLoaded();
         gameBuild = ComputeGameBuild();
@@ -146,6 +148,7 @@ sealed class NetRunner : MonoBehaviour
         fsms.Attach(session);
         world.Attach(session);
         money.Attach(session);
+        shared.Attach(session);
         session.PlayerJoined += p => ModConsole.Print("Co-op: " + p.Name + " joined");
         session.PlayerLeft += p => ModConsole.Print("Co-op: " + p.Name + " left");
         session.Ended += OnEnded;
@@ -172,6 +175,7 @@ sealed class NetRunner : MonoBehaviour
         fsms.Detach();
         world.Detach();
         money.Detach();
+        shared.Detach();
         var text = reason == EndReason.Rejected ? "rejected (" + session.LastRejectReason + ")" : reason.ToString();
         ModConsole.Print("Co-op: session ended, " + text);
         lobby?.Leave();
@@ -223,6 +227,7 @@ sealed class NetRunner : MonoBehaviour
         objects.Update();
         world.Update();
         money.Update();
+        shared.Update();
         if (overlay && Time.unscaledTime >= nextStatus)
         {
             nextStatus = Time.unscaledTime + StatusInterval;
@@ -236,6 +241,7 @@ sealed class NetRunner : MonoBehaviour
         fsms.OnGameReady();
         world.OnGameReady();
         money.OnGameReady();
+        shared.OnGameReady();
         flow.OnGameReady();
         players.OnGameReady();
     }
@@ -251,6 +257,7 @@ sealed class NetRunner : MonoBehaviour
         objects.OnLevelLoaded();
         world.OnLevelLoaded();
         money.OnLevelLoaded();
+        shared.OnLevelLoaded();
     }
 
     void OnGUI()
