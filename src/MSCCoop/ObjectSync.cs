@@ -178,7 +178,7 @@ sealed class ObjectSync
         }
         if (w == null)
             return;
-        PatchCount(w, countPosition, count);
+        w.Patch(countPosition, (uint)count, ObjectMessages.CountBits);
         session.Broadcast(Channel.State);
     }
 
@@ -237,7 +237,7 @@ sealed class ObjectSync
         }
         if (relay == null)
             return;
-        PatchCount(relay, relayCountPosition, relayCount);
+        relay.Patch(relayCountPosition, (uint)relayCount, ObjectMessages.CountBits);
         session.Broadcast(Channel.State, from);
     }
 
@@ -417,22 +417,8 @@ sealed class ObjectSync
 
     void FinishStates(BitWriter w, int countPosition, int count)
     {
-        PatchCount(w, countPosition, count);
+        w.Patch(countPosition, (uint)count, ObjectMessages.CountBits);
         session.Broadcast(Channel.State);
-    }
-
-    static void PatchCount(BitWriter w, int position, int count)
-    {
-        var buffer = w.Buffer;
-        for (var bit = 0; bit < ObjectMessages.CountBits; bit++)
-        {
-            var at = position + bit;
-            var mask = (byte)(1 << (at & 7));
-            if ((count >> bit & 1) != 0)
-                buffer[at >> 3] |= mask;
-            else
-                buffer[at >> 3] &= (byte)~mask;
-        }
     }
 
     void OnMessage(Connection from, MessageType type, BitReader r)
@@ -600,7 +586,7 @@ sealed class ObjectSync
 
         if (relay != null)
         {
-            PatchCount(relay, relayCountPosition, relayCount);
+            relay.Patch(relayCountPosition, (uint)relayCount, ObjectMessages.CountBits);
             session.Broadcast(Channel.State, from);
         }
     }

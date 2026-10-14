@@ -48,6 +48,23 @@ public class SerializationTests
     }
 
     [Fact]
+    public void PatchRewritesAFieldAcrossByteBoundaries()
+    {
+        var buffer = new byte[16];
+        var writer = new BitWriter(buffer);
+        writer.Write(5, 3);
+        var position = writer.BitPosition;
+        writer.Write(0, 8);
+        writer.Write(0x3FF, 10);
+        writer.Patch(position, 0xA5, 8);
+
+        var reader = new BitReader(buffer, writer.Length);
+        Assert.Equal(5u, reader.Read(3));
+        Assert.Equal(0xA5u, reader.Read(8));
+        Assert.Equal(0x3FFu, reader.Read(10));
+    }
+
+    [Fact]
     public void WriterFlagsOverflowInsteadOfThrowing()
     {
         var writer = new BitWriter(new byte[2]);

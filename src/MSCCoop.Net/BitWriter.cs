@@ -50,6 +50,20 @@ public sealed class BitWriter
         }
     }
 
+    // Fills in a field written earlier, typically a count that is only known after the entries.
+    public void Patch(int position, uint value, int bits)
+    {
+        for (var bit = 0; bit < bits; bit++)
+        {
+            var at = position + bit;
+            var mask = (byte)(1 << (at & 7));
+            if ((value >> bit & 1) != 0)
+                buffer[at >> 3] |= mask;
+            else
+                buffer[at >> 3] &= (byte)~mask;
+        }
+    }
+
     public void WriteBool(bool value) => Write(value ? 1u : 0u, 1);
     public void WriteByte(byte value) => Write(value, 8);
     public void WriteUShort(ushort value) => Write(value, 16);
