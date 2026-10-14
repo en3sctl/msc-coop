@@ -48,6 +48,17 @@ public sealed class BitReader
         return value;
     }
 
+    public void Skip(int bits)
+    {
+        if (bitPosition + bits > lengthBits)
+        {
+            Overflow = true;
+            bitPosition = lengthBits;
+            return;
+        }
+        bitPosition += bits;
+    }
+
     public bool ReadBool() => Read(1) != 0;
     public byte ReadByte() => (byte)Read(8);
     public ushort ReadUShort() => (ushort)Read(16);

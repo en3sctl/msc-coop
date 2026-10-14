@@ -172,6 +172,28 @@ public class SessionTests
     }
 
     [Fact]
+    public void HeldGameMessagesArriveInOrderOnRelease()
+    {
+        var host = CreateHost();
+        var a = CreateClient(1);
+        Run(1, host, a);
+
+        var received = new List<uint>();
+        host.MessageReceived += (from, type, reader) => received.Add(reader.ReadUInt());
+        host.HoldGameMessages = true;
+        for (uint i = 0; i < 5; i++)
+        {
+            a.BeginMessage(MessageType.FirstGameMessage).WriteUInt(i);
+            a.Send(a.HostConnection!, Channel.Control);
+        }
+        Run(0.1, host, a);
+        Assert.Empty(received);
+
+        host.HoldGameMessages = false;
+        Assert.Equal(new uint[] { 0, 1, 2, 3, 4 }, received);
+    }
+
+    [Fact]
     public void GarbagePacketsAreIgnored()
     {
         var host = CreateHost();

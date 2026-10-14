@@ -83,6 +83,33 @@ public sealed class Session
     public event Action<EndReason> Ended;
     public event MessageHandler MessageReceived;
 
+    const int MaxHeldMessages = 20000;
+
+    struct HeldMessage
+    {
+        public Connection From;
+        public MessageType Type;
+        public byte[] Data;
+        public int Length;
+        public int BitPosition;
+    }
+
+    readonly List<HeldMessage> held = new();
+    bool holding;
+
+    // While a level loads nothing can apply game messages, so they are kept and delivered in order
+    // once everything is ready instead of being dropped as unknown.
+    public bool HoldGameMessages
+    {
+        get => holding;
+        set
+        {
+            holding = value;
+            if (!value)
+                ReleaseHeld();
+        }
+    }
+
     public SessionState State { get; private set; }
     public bool IsHost { get; private set; }
     public byte LocalSlot { get; private set; }
@@ -264,8 +291,19 @@ public sealed class Session
                 RemovePlayer(reader.ReadByte());
                 break;
             default:
-                if (type >= MessageType.FirstGameMessage && c.Established)
-                    MessageReceived?.Invoke(c, type, reader);
+                if (type < MessageType.FirstGameMessage || !c.Established)
+                    break;
+                if (holding)
+                {
+                    if (held.Count < MaxHeldMessages)
+                    {
+                        var copy = new byte[length];
+                        Buffer.BlockCopy(receiveBuffer, 0, copy, 0, length);
+                        held.Add(new HeldMessage { From = c, Type = type, Data = copy, Length = length, BitPosition = reader.BitPosition });
+                    }
+                    break;
+                }
+                MessageReceived?.Invoke(c, type, reader);
                 break;
         }
     }
@@ -424,8 +462,24 @@ public sealed class Session
         Ended?.Invoke(reason);
     }
 
+    void ReleaseHeld()
+    {
+        for (var i = 0; i < held.Count && State != SessionState.Idle; i++)
+        {
+            var m = held[i];
+            if (!connections.Contains(m.From))
+                continue;
+            var r = new BitReader(m.Data, m.Length);
+            r.Skip(m.BitPosition);
+            MessageReceived?.Invoke(m.From, m.Type, r);
+        }
+        held.Clear();
+    }
+
     void Reset()
     {
+        held.Clear();
+        holding = false;
         connections.Clear();
         Array.Clear(players, 0, players.Length);
         State = SessionState.Idle;
