@@ -20,6 +20,8 @@ sealed class ObjectSync
     const int BodyCheckInterval = 50;
     const int MaxPacketsPerSend = 2;
     const int SnapshotChunk = 400;
+    const int VehicleSendDivider = 2;
+    const float RpmSmoothing = 0.3f;
 
     // The pickup ray ignores the layer the game itself gives an item while it is in a hand.
     const int HeldElsewhereLayer = 16;
@@ -42,6 +44,7 @@ sealed class ObjectSync
     bool worldReady;
     int fixedStep;
     int sendCursor;
+    int sendTick;
     double nextSend;
 
     bool Active => session != null && session.State == SessionState.Connected && built;
@@ -147,6 +150,111 @@ sealed class ObjectSync
             return;
         nextSend = hostTime + SendInterval;
         SendStates(hostTime);
+        if (++sendTick % VehicleSendDivider == 0)
+            SendVehicles();
+    }
+
+    void SendVehicles()
+    {
+        BitWriter w = null;
+        var countPosition = 0;
+        var count = 0;
+        foreach (var obj in registry.Objects)
+        {
+            var v = obj.Vehicle;
+            if (v == null || obj.Owner.Owner != Local || !obj.Owner.Held || v.Drivetrain == null || v.Controller == null)
+                continue;
+            if (w == null)
+            {
+                w = session.BeginMessage(MessageType.VehicleStates);
+                w.Write(Local, ObjectMessages.SlotBits);
+                countPosition = w.BitPosition;
+                w.Write(0, ObjectMessages.CountBits);
+            }
+            WriteVehicle(w, obj.Id, v.Drivetrain.rpm, v.Drivetrain.throttle, v.Controller.brake, v.Controller.steering, v.Drivetrain.gear);
+            count++;
+        }
+        if (w == null)
+            return;
+        PatchCount(w, countPosition, count);
+        session.Broadcast(Channel.State);
+    }
+
+    static void WriteVehicle(BitWriter w, uint id, float rpm, float throttle, float brake, float steering, int gear)
+    {
+        w.WriteUInt(id);
+        Quantize.WriteRanged(w, rpm, 0, 10000, 14);
+        Quantize.WriteRanged(w, throttle, 0, 1, 8);
+        Quantize.WriteRanged(w, brake, 0, 1, 8);
+        Quantize.WriteRanged(w, steering, -1, 1, 8);
+        w.Write((uint)Mathf.Clamp(gear, 0, 15), 4);
+    }
+
+    void ReadVehicles(Connection from, BitReader r)
+    {
+        var owner = (byte)r.Read(ObjectMessages.SlotBits);
+        var count = (int)r.Read(ObjectMessages.CountBits);
+        if (r.Overflow || session.IsHost && owner != from.Slot)
+            return;
+
+        BitWriter relay = null;
+        var relayCountPosition = 0;
+        var relayCount = 0;
+        for (var i = 0; i < count; i++)
+        {
+            var id = r.ReadUInt();
+            var rpm = Quantize.ReadRanged(r, 0, 10000, 14);
+            var throttle = Quantize.ReadRanged(r, 0, 1, 8);
+            var brake = Quantize.ReadRanged(r, 0, 1, 8);
+            var steering = Quantize.ReadRanged(r, -1, 1, 8);
+            var gear = (int)r.Read(4);
+            if (r.Overflow)
+                return;
+            var obj = registry.Find(id);
+            if (obj?.Vehicle == null || obj.Owner.Owner != owner || !obj.Proxy)
+                continue;
+            var v = obj.Vehicle;
+            v.Rpm = rpm;
+            v.Throttle = throttle;
+            v.Brake = brake;
+            v.Steering = steering;
+            v.Gear = gear;
+            v.HasState = true;
+
+            if (!session.IsHost || session.Connections.Count < 2)
+                continue;
+            if (relay == null)
+            {
+                relay = session.BeginMessage(MessageType.VehicleStates);
+                relay.Write(owner, ObjectMessages.SlotBits);
+                relayCountPosition = relay.BitPosition;
+                relay.Write(0, ObjectMessages.CountBits);
+            }
+            WriteVehicle(relay, id, rpm, throttle, brake, steering, gear);
+            relayCount++;
+        }
+        if (relay == null)
+            return;
+        PatchCount(relay, relayCountPosition, relayCount);
+        session.Broadcast(Channel.State, from);
+    }
+
+    static void ApplyVehicle(VehicleParts v)
+    {
+        if (!v.HasState || v.Drivetrain == null)
+            return;
+        v.Drivetrain.rpm = Mathf.Lerp(v.Drivetrain.rpm, v.Rpm, RpmSmoothing);
+        v.Drivetrain.throttle = v.Throttle;
+        if (v.Gear < v.Drivetrain.gearRatios.Length)
+            v.Drivetrain.gear = v.Gear;
+        if (v.Controller != null)
+        {
+            v.Controller.brake = v.Brake;
+            v.Controller.brakeKey = v.Brake > 0.1f;
+            v.Controller.steering = v.Steering;
+        }
+        foreach (var wheel in v.Wheels)
+            wheel.steering = v.Steering;
     }
 
     public bool IsHeldLocally(NetObject obj) => obj.Owner.Owner == Local && obj.Owner.Held;
@@ -346,6 +454,9 @@ sealed class ObjectSync
                 break;
             case MessageType.ObjectStates:
                 ReadStates(from, r);
+                break;
+            case MessageType.VehicleStates:
+                ReadVehicles(from, r);
                 break;
         }
     }
@@ -609,6 +720,8 @@ sealed class ObjectSync
             obj.GameKinematic = false;
             body.isKinematic = true;
         }
+        if (obj.Vehicle != null)
+            ApplyVehicle(obj.Vehicle);
 
         var buffer = obj.Buffer;
         if (buffer.Count == 0)
@@ -635,6 +748,21 @@ sealed class ObjectSync
         obj.Proxy = true;
         obj.Buffer ??= new SnapshotBuffer();
         obj.Buffer.Clear();
+        var v = obj.Vehicle;
+        if (v != null)
+        {
+            v.HasState = false;
+            if (v.Drivetrain != null)
+            {
+                v.DrivetrainWasEnabled = v.Drivetrain.enabled;
+                v.Drivetrain.enabled = false;
+            }
+            if (v.Controller != null)
+            {
+                v.ControllerWasEnabled = v.Controller.enabled;
+                v.Controller.enabled = false;
+            }
+        }
         var body = Body(obj);
         if (body == null)
             return;
@@ -649,6 +777,14 @@ sealed class ObjectSync
         if (!obj.Proxy)
             return;
         obj.Proxy = false;
+        var v = obj.Vehicle;
+        if (v != null)
+        {
+            if (v.Drivetrain != null)
+                v.Drivetrain.enabled = v.DrivetrainWasEnabled;
+            if (v.Controller != null)
+                v.Controller.enabled = v.ControllerWasEnabled;
+        }
         var body = Body(obj);
         if (body == null)
             return;

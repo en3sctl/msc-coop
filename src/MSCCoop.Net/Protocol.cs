@@ -49,6 +49,7 @@ public enum MessageType : byte
     BoltStage = 46,
     WorldTime = 47,
     WorldWeather = 48,
+    VehicleStates = 49,
 }
 
 public enum RejectReason : byte

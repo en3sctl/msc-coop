@@ -5,12 +5,30 @@ using UnityEngine;
 
 namespace MSCCoop;
 
+// What a remote copy of a vehicle needs to look and sound driven: its drivetrain and controller are
+// stopped and fed the driver's values, since both would otherwise overwrite them from local input.
+sealed class VehicleParts(GameObject go)
+{
+    public readonly Drivetrain Drivetrain = go.GetComponent<Drivetrain>();
+    public readonly CarController Controller = go.GetComponent<CarController>();
+    public readonly Wheel[] Wheels = go.GetComponent<Axles>() is { } axles ? axles.allWheels : new Wheel[0];
+    public bool DrivetrainWasEnabled;
+    public bool ControllerWasEnabled;
+    public bool HasState;
+    public float Rpm;
+    public float Throttle;
+    public float Brake;
+    public float Steering;
+    public int Gear;
+}
+
 sealed class NetObject(uint id, GameObject go)
 {
     public readonly uint Id = id;
     public readonly GameObject Go = go;
     public readonly int Layer = go.layer;
-    public readonly bool IsVehicle = go.GetComponent<CarDynamics>() != null;
+    public readonly VehicleParts Vehicle = go.GetComponent<CarDynamics>() != null ? new VehicleParts(go) : null;
+    public bool IsVehicle => Vehicle != null;
     public Collider[] SeatTriggers;
     public Rigidbody Body;
     public int NextBodyCheck;
