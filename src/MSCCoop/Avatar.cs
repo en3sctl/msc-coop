@@ -28,6 +28,8 @@ sealed class Avatar
     readonly Transform[] bones;
     readonly Pose[] standingPose;
     readonly Pose[] seatedPose;
+    readonly Vector3 modelOffset;
+    readonly Quaternion modelRotation;
     string playing;
     bool seated;
 
@@ -38,8 +40,11 @@ sealed class Avatar
         public Quaternion Rotation;
     }
 
-    Avatar(GameObject root, Animation animation, Transform nameTag, Transform[] bones, Pose[] standingPose, Pose[] seatedPose)
+    Avatar(GameObject root, Animation animation, Transform nameTag, Transform[] bones, Pose[] standingPose, Pose[] seatedPose,
+        Vector3 modelOffset, Quaternion modelRotation)
     {
+        this.modelOffset = modelOffset;
+        this.modelRotation = modelRotation;
         this.root = root;
         this.animation = animation;
         this.nameTag = nameTag;
@@ -57,6 +62,12 @@ sealed class Avatar
             ModConsole.Error("Co-op: could not find an NPC model to use for " + name + ".");
             return null;
         }
+
+        // The walker's root decides where it stands and which way it faces; Char sits under it at an offset.
+        var walker = template.parent.parent;
+        var inverse = Quaternion.Inverse(walker.rotation);
+        var modelOffset = inverse * (template.position - walker.position);
+        var modelRotation = inverse * template.rotation;
 
         var copy = (GameObject)Object.Instantiate(template.gameObject);
         copy.name = "MSCCoop Player " + slot;
@@ -77,13 +88,14 @@ sealed class Avatar
             standing[i] = new Pose { Valid = true, Position = bones[i].localPosition, Rotation = bones[i].localRotation };
 
         return new Avatar(copy, copy.GetComponentInChildren<Animation>(), CreateNameTag(copy.transform, name),
-            bones, standing, CaptureSeatedPose(skeleton, bones));
+            bones, standing, CaptureSeatedPose(skeleton, bones), modelOffset, modelRotation);
     }
 
     public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Transform camera)
     {
-        root.transform.position = position;
-        root.transform.rotation = rotation;
+        root.transform.position = position + rotation * modelOffset;
+        root.transform.rotation = rotation * modelRotation;
+        nameTag.position = position + Vector3.up * NameTagHeight;
         if (camera != null)
             nameTag.rotation = camera.rotation;
 
