@@ -97,13 +97,13 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         if (fsm.GetState("Assemble") != null)
         {
             fsm.FsmInject("Assemble", () => OnLocalAssemble(fsm, part, 0), index: 0);
-            fsm.AddGlobalTransition(AssembleEvent, "Assemble");
+            fsm.AddSharedGlobalTransition(AssembleEvent, "Assemble");
             hooked = true;
         }
         if (fsm.GetState("Assemble 2") != null)
         {
             fsm.FsmInject("Assemble 2", () => OnLocalAssemble(fsm, part, 1), index: 0);
-            fsm.AddGlobalTransition(AssembleEvent2, "Assemble 2");
+            fsm.AddSharedGlobalTransition(AssembleEvent2, "Assemble 2");
             hooked = true;
         }
         if (!hooked || part == null)
@@ -119,7 +119,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             return;
         }
         fsm.FsmInject("Remove part", () => OnLocalRemove(fsm, detach), index: 0);
-        fsm.AddGlobalTransition(RemoveEvent, "Remove part");
+        fsm.AddSharedGlobalTransition(RemoveEvent, "Remove part");
     }
 
     void HookScrew(PlayMakerFSM fsm)
@@ -138,7 +138,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         fsm.FsmInject("Screw 2", () => OnLocalTurn(fsm), index: 0);
         fsm.FsmInject("Unscrew 2", () => OnLocalTurn(fsm), index: 0);
         fsm.FsmInject("Get scroll 2", () => OnStageSettled(fsm), index: 0);
-        fsm.AddGlobalTransition(StageEvent, "Stages 2");
+        fsm.AddSharedGlobalTransition(StageEvent, "Stages 2");
     }
 
     void HookToggle(PlayMakerFSM fsm)
@@ -152,7 +152,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             {
                 var index = i;
                 fsm.FsmInject(pair[i], () => OnLocalToggle(fsm, index), index: 0);
-                fsm.AddGlobalTransition(ToggleEvent + i, pair[i]);
+                fsm.AddSharedGlobalTransition(ToggleEvent + i, pair[i]);
             }
             return;
         }

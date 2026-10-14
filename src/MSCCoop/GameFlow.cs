@@ -117,7 +117,7 @@ sealed class GameFlow(string clientSaveDir)
         continueButton = button.GetComponent<Collider>();
         newGameButton = GameObject.Find("Interface/Buttons/ButtonNewgame").GetComponent<Collider>();
         continueFsm.FsmInject(ContinueState, OnContinue, index: 0);
-        continueFsm.AddGlobalTransition(ContinueEvent, ContinueState);
+        continueFsm.AddSharedGlobalTransition(ContinueEvent, ContinueState);
     }
 
     void SetMenuButtons(bool enabled)

@@ -87,7 +87,7 @@ sealed class WorldSync
             ModConsole.Error("Co-op: the sun or weather logic has changed, time and weather will not sync.");
             return;
         }
-        weather.AddGlobalTransition(WeatherEvent, "Set cloud");
+        weather.AddSharedGlobalTransition(WeatherEvent, "Set cloud");
         // The host announces a new weather roll as soon as it happens instead of at the next interval.
         weather.FsmInject("Move clouds", () => nextWeather = 0, index: 0);
         ready = true;
