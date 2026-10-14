@@ -100,6 +100,8 @@ sealed class ObjectSync
         var w = session.BeginMessage(MessageType.ObjectHello);
         w.WriteUShort((ushort)registry.Objects.Count);
         w.WriteUInt(registry.Hash);
+        w.WriteUShort((ushort)registry.Fsms.Count);
+        w.WriteUInt(registry.FsmHash);
         session.Send(session.HostConnection, Channel.Control);
     }
 
@@ -431,6 +433,8 @@ sealed class ObjectSync
             case MessageType.ObjectHello when session.IsHost:
                 var count = r.ReadUShort();
                 var hash = r.ReadUInt();
+                var fsmCount = r.ReadUShort();
+                var fsmHash = r.ReadUInt();
                 if (!built)
                 {
                     pendingSnapshots.Add(from);
@@ -438,6 +442,8 @@ sealed class ObjectSync
                 }
                 if (count != registry.Objects.Count || hash != registry.Hash)
                     ModConsole.Warning("Co-op: player " + from.Slot + " tracks " + count + " objects, host tracks " + registry.Objects.Count + ". Some objects will not sync.");
+                if (fsmCount != registry.Fsms.Count || fsmHash != registry.FsmHash)
+                    ModConsole.Warning("Co-op: player " + from.Slot + " tracks " + fsmCount + " FSMs, host tracks " + registry.Fsms.Count + ". Some doors and parts will not sync.");
                 SendSnapshot(from);
                 break;
             case MessageType.ObjectSnapshot when !session.IsHost:

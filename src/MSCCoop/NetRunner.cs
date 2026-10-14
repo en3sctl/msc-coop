@@ -279,6 +279,8 @@ sealed class NetRunner : MonoBehaviour
             }
             status.AppendLine();
         }
+        if (fsms != null)
+            status.Append("fsm sent ").Append(fsms.Sent).Append(" applied ").Append(fsms.Applied).Append(" unknown ").Append(fsms.Unknown).AppendLine();
         if (sim != null && sim.Enabled)
             status.Append("sim ").Append((int)(simLatency * 1000)).Append(" ms +").Append((int)(simJitter * 1000)).Append(" ms ").Append((int)(simLoss * 100)).Append("% loss");
         return status.ToString();

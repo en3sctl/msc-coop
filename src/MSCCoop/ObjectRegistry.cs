@@ -60,6 +60,7 @@ sealed class ObjectRegistry
     public readonly List<NetObject> Objects = new();
     public readonly List<PlayMakerFSM> Fsms = new();
     public uint Hash { get; private set; }
+    public uint FsmHash { get; private set; }
 
     public void Clear()
     {
@@ -221,12 +222,14 @@ sealed class ObjectRegistry
             }
         }
 
+        entries.Sort((a, b) => string.CompareOrdinal(a.Key, b.Key));
         var counts = new Dictionary<uint, int>();
         foreach (var e in entries)
         {
             var id = Fnv.Hash32(e.Key);
             counts[id] = counts.TryGetValue(id, out var n) ? n + 1 : 1;
         }
+        var hash = Fnv.Offset32;
         foreach (var e in entries)
         {
             var id = Fnv.Hash32(e.Key);
@@ -235,7 +238,9 @@ sealed class ObjectRegistry
             fsmsById[id] = e.Value;
             idsByFsm[e.Value] = id;
             Fsms.Add(e.Value);
+            hash = Fnv.Hash32(e.Key, hash);
         }
+        FsmHash = hash;
     }
 
     bool IsExcluded(GameObject go)

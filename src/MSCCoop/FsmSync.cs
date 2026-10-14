@@ -41,6 +41,10 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     bool applying;
     int unsupported;
 
+    public int Sent { get; private set; }
+    public int Applied { get; private set; }
+    public int Unknown { get; private set; }
+
     bool Active => session != null && session.State == SessionState.Connected;
 
     public void Attach(Session newSession)
@@ -163,13 +167,17 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteUInt(id);
         w.WriteByte((byte)index);
         session.Broadcast(Channel.Control);
+        Sent++;
     }
 
     void ApplyToggle(uint id, int index)
     {
         var fsm = registry.FindFsm(id);
         if (fsm == null || !toggles.TryGetValue(fsm, out var pair) || index >= pair.Length)
+        {
+            Unknown++;
             return;
+        }
         // Replaying the state the door is already in would snap its animation back and play it again.
         if (toggleState.TryGetValue(fsm, out var current) && current == index)
             return;
@@ -191,6 +199,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.WriteByte(variant);
         w.WriteUInt(part.Id);
         session.Broadcast(Channel.Control);
+        Sent++;
         objects.ReleaseWithoutPose(part);
         objects.RefreshBody(part);
     }
@@ -202,6 +211,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
             return;
         session.BeginMessage(MessageType.PartRemove).WriteUInt(id);
         session.Broadcast(Channel.Control);
+        Sent++;
         var part = registry.Find(fsm.gameObject);
         if (part != null)
             objects.ClaimNextStep(part);
@@ -223,6 +233,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         w.Write((uint)Mathf.Clamp(bolt.Stage.Value, 0, 8), 4);
         w.WriteFloat(bolt.Tightness == null ? 0 : bolt.Tightness.Value);
         session.Broadcast(Channel.Control);
+        Sent++;
     }
 
     void OnMessage(Connection from, MessageType type, BitReader r)
@@ -297,7 +308,10 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
         var fsm = registry.FindFsm(assemblyId);
         var part = registry.Find(partId);
         if (fsm == null || part == null)
+        {
+            Unknown++;
             return;
+        }
         objects.TakeOutOfProxy(part);
         fsm.FsmVariables.FindFsmGameObject("Part").Value = part.Go;
         Apply(fsm, variant == 0 ? AssembleEvent : AssembleEvent2);
@@ -308,7 +322,10 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     {
         var fsm = registry.FindFsm(removalId);
         if (fsm == null)
+        {
+            Unknown++;
             return;
+        }
         Apply(fsm, RemoveEvent);
         var part = registry.Find(fsm.gameObject);
         if (part != null)
@@ -319,7 +336,10 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     {
         var fsm = registry.FindFsm(boltId);
         if (fsm == null || !bolts.TryGetValue(fsm, out var bolt))
+        {
+            Unknown++;
             return;
+        }
         bolt.Stage.Value = stage;
         Apply(fsm, StageEvent);
         if (bolt.Tightness != null)
@@ -328,6 +348,7 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
 
     void Apply(PlayMakerFSM fsm, string eventName)
     {
+        Applied++;
         applying = true;
         try
         {
