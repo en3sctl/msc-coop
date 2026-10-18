@@ -11,7 +11,7 @@ public class ReconMod : Mod
     public override string Name => "MSC Co-op Recon";
     public override string Version => "0.1.0";
     public override string Author => "MSC Co-op contributors";
-    public override string Description => "Developer tool. Dumps the scene hierarchy and every PlayMaker FSM to disk.";
+    public override string Description => "Developer tool. Dumps the scene hierarchy and every PlayMaker FSM to disk, and adds test shortcuts.";
 
     bool initialized;
 
@@ -27,6 +27,7 @@ public class ReconMod : Mod
         if (initialized)
             return;
         ConsoleCommand.Add(new ReconCommand(this));
+        ConsoleCommand.Add(new TestCommand(Path.Combine(ModLoader.GetModSettingsFolder(this), "marks.txt")));
         var watcher = new GameObject("MSCCoopRecon").AddComponent<LevelWatcher>();
         watcher.Mod = this;
         UnityEngine.Object.DontDestroyOnLoad(watcher.gameObject);
