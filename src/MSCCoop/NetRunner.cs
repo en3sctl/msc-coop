@@ -31,6 +31,7 @@ sealed class NetRunner : MonoBehaviour
     GameFlow flow;
     readonly ObjectSync objects = new();
     PlayerSync players;
+    PassengerSeat passenger;
     FsmSync fsms;
     readonly WorldSync world = new();
     readonly MoneySync money = new();
@@ -49,7 +50,8 @@ sealed class NetRunner : MonoBehaviour
         modVersion = version;
         dumpDir = Path.Combine(dataDir, "dumps");
         var clientSaveDir = Path.Combine(dataDir, "client-save");
-        players = new PlayerSync(objects.Registry);
+        passenger = new PassengerSeat(objects.Registry);
+        players = new PlayerSync(objects.Registry, passenger);
         players.Init();
         fsms = new FsmSync(objects.Registry, objects);
         shared = new SharedValueSync(objects.Registry);
@@ -239,6 +241,7 @@ sealed class NetRunner : MonoBehaviour
         steam?.Update(Now);
         session?.Update(Now);
         flow.Update();
+        passenger.Update();
         players.Update(Time.deltaTime);
         objects.Update();
         world.Update();
@@ -261,6 +264,7 @@ sealed class NetRunner : MonoBehaviour
         shared.OnGameReady();
         flow.OnGameReady();
         players.OnGameReady();
+        passenger.OnGameReady();
         if (session != null)
             session.HoldGameMessages = false;
     }
@@ -275,6 +279,7 @@ sealed class NetRunner : MonoBehaviour
             session.HoldGameMessages = Application.loadedLevelName == "GAME";
         flow.OnLevelLoaded();
         players.OnLevelLoaded();
+        passenger.OnLevelLoaded();
         objects.OnLevelLoaded();
         world.OnLevelLoaded();
         money.OnLevelLoaded();

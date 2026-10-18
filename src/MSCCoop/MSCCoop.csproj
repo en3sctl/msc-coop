@@ -19,6 +19,7 @@
     <Reference Include="PlayMaker" HintPath="$(ManagedDir)\PlayMaker.dll" Private="false" />
     <Reference Include="Assembly-CSharp-firstpass" HintPath="$(ManagedDir)\Assembly-CSharp-firstpass.dll" Private="false" />
     <Reference Include="UnityEngine" HintPath="$(ManagedDir)\UnityEngine.dll" Private="false" />
+    <Reference Include="cInput" HintPath="$(ManagedDir)\cInput.dll" Private="false" />
   </ItemGroup>
 
   <Target Name="CopyToMods" AfterTargets="Build" Condition="Exists('$(GameDir)\Mods')">

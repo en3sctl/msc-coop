@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace MSCCoop;
 
-sealed class PlayerSync(ObjectRegistry registry)
+sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
 {
     const double SendInterval = 0.05;
     const float CrouchDrop = 0.35f;
@@ -190,7 +190,7 @@ sealed class PlayerSync(ObjectRegistry registry)
 
     PlayerFlags LocalFlags()
     {
-        if (!string.IsNullOrEmpty(currentVehicle.Value))
+        if (!string.IsNullOrEmpty(currentVehicle.Value) || passenger.Seated)
             return PlayerFlags.InVehicle;
         if (pov.Value == null)
             return PlayerFlags.None;

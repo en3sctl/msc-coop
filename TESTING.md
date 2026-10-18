@@ -72,7 +72,7 @@ The van (`hayosiko`) drives out of the box, so vehicle scenarios do not need a b
 15. **[lag]** Host drives the van, client watches from outside. Movement is smooth, engine sound follows rpm and gears.
 16. Same with the client driving and the host watching.
 17. While one player drives, the other tries to take the driver's seat. It is refused.
-18. Client sits in the passenger seat while the host drives. The client's avatar stays in its seat.
+18. **[lag]** While the host drives, the client gets in on the other side and presses the driving mode key (Enter) when "PASSENGER" shows. The client rides along without sliding, can look around, and gets out with the same key. On the host the client's avatar sits in the passenger seat.
 19. Crash the Satsuma into a wall hard enough for loose parts to fall off. The same parts fall off on both.
 20. **[lag]** Drive the Satsuma with bumpers, fenders, doors, hood and seats fitted, fast past the other player. On the other side every part stays on the car, nothing shakes or flies off. The driver opens and closes a door while seated: the other side sees it swing.
 21. Refuel a vehicle on one side and drive it on the other for a few minutes. Fuel level matches in the dump and drops at the normal rate.
