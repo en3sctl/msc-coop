@@ -9,9 +9,19 @@ namespace MSCCoop;
 // stopped and fed the driver's values, since both would otherwise overwrite them from local input.
 sealed class VehicleParts(GameObject go)
 {
+    // Simulated only where the vehicle is driven: elsewhere they would burn fuel a second time and
+    // roll their own random engine damage from the driver's rpm.
+    static readonly string[] DriverOnlyFsms = { "FuelLine", "RedLining" };
+
     public readonly Drivetrain Drivetrain = go.GetComponent<Drivetrain>();
     public readonly CarController Controller = go.GetComponent<CarController>();
     public readonly Wheel[] Wheels = go.GetComponent<Axles>() is { } axles ? axles.allWheels : new Wheel[0];
+    public readonly PlayMakerFSM Lod = go.GetPlayMaker("LOD");
+    public readonly List<NetObject> Attached = new();
+    public readonly PlayMakerFSM Starter = FindFsms(go, "Starter") is { Count: > 0 } starters ? starters[0] : null;
+    public readonly List<PlayMakerFSM> DriverOnly = FindFsms(go, DriverOnlyFsms);
+    public bool RemoteRunning;
+    public bool StartSent;
     public bool DrivetrainWasEnabled;
     public bool ControllerWasEnabled;
     public bool HasState;
@@ -20,6 +30,17 @@ sealed class VehicleParts(GameObject go)
     public float Brake;
     public float Steering;
     public int Gear;
+
+    static List<PlayMakerFSM> FindFsms(GameObject go, params string[] names)
+    {
+        var found = new List<PlayMakerFSM>();
+        foreach (var fsm in go.GetComponentsInChildren<PlayMakerFSM>(true))
+        {
+            if (System.Array.IndexOf(names, fsm.FsmName) >= 0)
+                found.Add(fsm);
+        }
+        return found;
+    }
 }
 
 sealed class NetObject(uint id, GameObject go)
@@ -44,6 +65,18 @@ sealed class NetObject(uint id, GameObject go)
     public double LastSentTime = double.NaN;
     public float LastHeldLocally = float.NegativeInfinity;
     public bool DestroyedByNetwork;
+    public int NextAttachCheck;
+    public NetObject AttachedTo;
+    public Vector3 LocalPosition;
+    public Quaternion LocalRotation;
+    public Vector3 LocalPositionTarget;
+    public Quaternion LocalRotationTarget;
+    public Vector3 LastSentLocalPosition;
+    public Quaternion LastSentLocalRotation;
+    public float LastLocalSend = float.NegativeInfinity;
+    public bool HasTarget;
+    public Vector3 TargetPosition;
+    public Quaternion TargetRotation;
 }
 
 // Identifies every synced rigidbody the same way on every machine. Scene objects are keyed by their
@@ -53,7 +86,7 @@ sealed class ObjectRegistry
 {
     // Moved by their own logic on every machine, so each machine would keep claiming them.
     static readonly string[] ExcludedRoots = { "PLAYER", "TRAFFIC", "NPC_CARS", "HUMANS", "RALLY", "TRAIN" };
-    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use", "Data", "Assemble", "BoltCheck" };
+    public static readonly string[] TrackedFsms = { "Assembly", "Removal", "Screw", "Use", "Data", "Assemble", "BoltCheck", "Horn", "Knob", "Usage" };
 
     readonly List<KeyValuePair<string, GameObject>> awake = new();
     readonly List<KeyValuePair<string, PlayMakerFSM>> awakeFsms = new();

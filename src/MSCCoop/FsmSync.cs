@@ -18,15 +18,23 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
     const string ToggleEvent = "MSCCOOP_TOGGLE_";
     const string StepEvent = "MSCCOOP_STEP_";
 
-    // Doors, hoods, lids and similar: the game plays an animation in these states, so entering the
-    // same state on every machine reproduces the movement and the sound.
+    // Doors, hoods, lids and dashboard switches: each state is one position, and the game moves the
+    // part and switches what it controls on entering it, so entering the same state on every
+    // machine reproduces it. The first set whose states all exist wins, so longer sets come first.
     static readonly string[][] TogglePairs =
     {
         new[] { "Open door", "Close door" },
         new[] { "Open hood", "Close hood" },
         new[] { "Open hood 2", "Close hood 2" },
         new[] { "Open", "Close" },
+        new[] { "Off", "Shorts", "Longs" },
+        new[] { "Longs", "Shorts" },
+        new[] { "Off", "Slow", "Fast" },
+        new[] { "On", "Off" },
     };
+
+    // The horn sounds for as long as its state is active, which ends on the local mouse release.
+    static readonly string[] HornStates = { "State 1", "Mouse over 2" };
 
     sealed class Bolt
     {
@@ -117,8 +125,18 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
                 case "Screw":
                     HookScrew(fsm);
                     break;
+                case "Use" when fsm.gameObject.name == "ButtonHorn":
+                case "Horn":
+                    HookToggle(fsm, HornStates);
+                    break;
                 case "Use":
                     HookToggle(fsm);
+                    break;
+                case "Knob" when fsm.FsmVariables.FindFsmGameObject("Windows") != null:
+                    HookSteps(fsm, IsWindowStep);
+                    break;
+                case "Usage" when fsm.GetState("Activate dash") != null:
+                    HookSteps(fsm, IsTurnSignalStep);
                     break;
                 case "Assemble":
                     HookSteps(fsm, IsWireStep);
@@ -185,24 +203,32 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
 
     void HookToggle(PlayMakerFSM fsm)
     {
-        foreach (var pair in TogglePairs)
+        foreach (var states in TogglePairs)
         {
-            if (fsm.GetState(pair[0]) == null || fsm.GetState(pair[1]) == null)
-                continue;
-            toggles[fsm] = pair;
-            for (var i = 0; i < pair.Length; i++)
+            if (System.Array.TrueForAll(states, s => fsm.GetState(s) != null))
             {
-                var index = i;
-                fsm.FsmInject(pair[i], () => OnLocalToggle(fsm, index), index: 0);
-                fsm.AddSharedGlobalTransition(ToggleEvent + i, pair[i]);
+                HookToggle(fsm, states);
+                return;
             }
-            return;
+        }
+    }
+
+    void HookToggle(PlayMakerFSM fsm, string[] states)
+    {
+        toggles[fsm] = states;
+        for (var i = 0; i < states.Length; i++)
+        {
+            var index = i;
+            fsm.FsmInject(states[i], () => OnLocalToggle(fsm, index), index: 0);
+            fsm.AddSharedGlobalTransition(ToggleEvent + i, states[i]);
         }
     }
 
     void OnLocalToggle(PlayMakerFSM fsm, int index)
     {
         if (applying || !Active || !registry.TryGetFsmId(fsm, out var id))
+            return;
+        if (toggleState.TryGetValue(fsm, out var current) && current == index)
             return;
         toggleState[fsm] = index;
         var w = session.BeginMessage(MessageType.ToggleState);
@@ -238,6 +264,12 @@ sealed class FsmSync(ObjectRegistry registry, ObjectSync objects)
 
     // A wire end connects in "Sound", which also tells the other end of the wire to close the loop.
     static bool IsWireStep(string state) => state == "Sound";
+
+    // One scroll step of a window crank moves the glass a fixed amount.
+    static bool IsWindowStep(string state) => state == "State 1" || state == "State 2";
+
+    // Turn signals blink on their own once switched on, until they are switched off again.
+    static bool IsTurnSignalStep(string state) => state == "Activate dash" || state == "Activate dash 2" || state == "State 3";
 
     // Loose parts break off on a random roll during crashes, which only the driver's machine simulates.
     static bool IsBreakOff(string state) => state == "Break off";

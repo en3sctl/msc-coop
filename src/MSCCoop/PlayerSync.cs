@@ -109,7 +109,8 @@ sealed class PlayerSync(ObjectRegistry registry)
             // Seats differ per vehicle and PLAYER's feet are meaningless while seated; the eyes are not.
             var t = vehicle.Go.transform;
             position = t.InverseTransformPoint(pov.Value != null ? pov.Value.transform.position : position);
-            yaw = (Quaternion.Inverse(t.rotation) * player.rotation).eulerAngles.y;
+            // Every seat faces forward; PLAYER keeps whatever way it faced when it got in.
+            yaw = 0;
             frame = vehicle.Id;
         }
 

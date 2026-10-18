@@ -22,6 +22,17 @@ sealed class ObjectSync
     const int SnapshotChunk = 400;
     const int VehicleSendDivider = 2;
     const float RpmSmoothing = 0.3f;
+    const int AttachCheckInterval = 50;
+    const int AttachedCountBits = 6;
+    const int MaxAttachedPerVehicle = (1 << AttachedCountBits) - 1;
+    const float LocalRange = 8f;
+    const int LocalBits = 16;
+    const float LocalSmoothing = 0.25f;
+    const float LocalRefreshSeconds = 1f;
+    const string ReanchorEvent = "MSCCOOP_REANCHOR";
+    const string StartEngineEvent = "MSCCOOP_START_ENGINE";
+
+    static readonly string[] EngineRunningStates = { "Start engine", "Crank up", "Running", "Motor running", "Start" };
 
     // The pickup ray ignores the layer the game itself gives an item while it is in a hand.
     const int HeldElsewhereLayer = 16;
@@ -37,6 +48,7 @@ sealed class ObjectSync
     readonly List<Connection> pendingSnapshots = new();
     readonly List<KeyValuePair<uint, OwnerInfo>> released = new();
     readonly List<NetObject> claimNextStep = new();
+    readonly List<NetObject> attached = new();
     Session session;
     PlayMakerFSM pickUp;
     FsmGameObject pickedObject;
@@ -73,6 +85,7 @@ sealed class ObjectSync
     {
         built = false;
         worldReady = false;
+        attached.Clear();
         if (Application.loadedLevelName == "GAME" && session != null)
             registry.CaptureAwake();
         else
@@ -126,6 +139,10 @@ sealed class ObjectSync
                 continue;
             }
             var body = Body(obj);
+            if (!obj.IsVehicle && fixedStep >= obj.NextAttachCheck)
+                UpdateAttachment(obj, body);
+            if (obj.AttachedTo != null)
+                continue;
             if (obj.Proxy)
             {
                 ApplyProxy(obj, body, hostTime, dt);
@@ -146,6 +163,88 @@ sealed class ObjectSync
                 Claim(obj, held: false);
             }
         }
+
+        for (var i = 0; i < attached.Count; i++)
+        {
+            var obj = attached[i];
+            var body = Body(obj);
+            if (body == null)
+                continue;
+            if (!obj.AttachedTo.Proxy)
+            {
+                EndProxy(obj);
+                continue;
+            }
+            if (!obj.Proxy)
+            {
+                CaptureLocalPose(obj);
+                BeginProxy(obj);
+            }
+            FollowVehicle(obj, body);
+        }
+    }
+
+    // Body panels, doors, seats, the battery and the fuel tank stay rigidbodies after they are
+    // installed and are jointed to the car. Owned or interpolated apart from the car, a joint pulls
+    // the car towards a part that lags behind it, so they move with whoever owns the car instead.
+    void UpdateAttachment(NetObject obj, Rigidbody body)
+    {
+        obj.NextAttachCheck = fixedStep + AttachCheckInterval;
+        var joint = body == null ? null : obj.Go.GetComponent<Joint>();
+        var vehicle = joint == null || joint.connectedBody == null ? null : registry.Find(joint.connectedBody.gameObject);
+        if (vehicle != null && !vehicle.IsVehicle)
+            vehicle = null;
+        if (vehicle == obj.AttachedTo)
+            return;
+        if (Diagnostics.Logging)
+            Diagnostics.Log("attach " + obj.Id.ToString("x8") + " " + obj.Key + " -> " + (vehicle == null ? "none" : vehicle.Key));
+        if (obj.AttachedTo != null)
+            Unattach(obj);
+        if (vehicle == null)
+        {
+            EndProxy(obj);
+            if (obj.Owner.IsOwned && obj.Owner.Owner != Local)
+                BeginProxy(obj);
+            return;
+        }
+        obj.AttachedTo = vehicle;
+        vehicle.Vehicle.Attached.Add(obj);
+        attached.Add(obj);
+        CaptureLocalPose(obj);
+        if (obj.Owner.Owner == Local)
+            Release(obj, withPose: false);
+    }
+
+    void Unattach(NetObject obj)
+    {
+        obj.AttachedTo.Vehicle.Attached.Remove(obj);
+        attached.Remove(obj);
+        obj.AttachedTo = null;
+    }
+
+    static void CaptureLocalPose(NetObject obj)
+    {
+        var vehicle = obj.AttachedTo.Go.transform;
+        var inverse = Quaternion.Inverse(vehicle.rotation);
+        obj.LocalPosition = obj.LocalPositionTarget = inverse * (obj.Go.transform.position - vehicle.position);
+        obj.LocalRotation = obj.LocalRotationTarget = inverse * obj.Go.transform.rotation;
+    }
+
+    // Placed from the pose the car is being moved to, not from where it is, so car and part arrive together.
+    static void FollowVehicle(NetObject obj, Rigidbody body)
+    {
+        if (!body.isKinematic)
+        {
+            obj.GameKinematic = false;
+            body.isKinematic = true;
+        }
+        var vehicle = obj.AttachedTo;
+        var position = vehicle.HasTarget ? vehicle.TargetPosition : vehicle.Go.transform.position;
+        var rotation = vehicle.HasTarget ? vehicle.TargetRotation : vehicle.Go.transform.rotation;
+        obj.LocalPosition = Vector3.Lerp(obj.LocalPosition, obj.LocalPositionTarget, LocalSmoothing);
+        obj.LocalRotation = Quaternion.Slerp(obj.LocalRotation, obj.LocalRotationTarget, LocalSmoothing);
+        body.MovePosition(position + rotation * obj.LocalPosition);
+        body.MoveRotation(rotation * obj.LocalRotation);
     }
 
     public void Update()
@@ -178,7 +277,8 @@ sealed class ObjectSync
                 countPosition = w.BitPosition;
                 w.Write(0, ObjectMessages.CountBits);
             }
-            WriteVehicle(w, obj.Id, v.Drivetrain.rpm, v.Drivetrain.throttle, v.Controller.brake, v.Controller.steering, v.Drivetrain.gear);
+            WriteVehicle(w, obj.Id, v.Drivetrain.rpm, v.Drivetrain.throttle, v.Controller.brake, v.Controller.steering, v.Drivetrain.gear, IsEngineRunning(v));
+            WriteAttached(w, obj);
             count++;
         }
         if (w == null)
@@ -187,7 +287,10 @@ sealed class ObjectSync
         session.Broadcast(Channel.State);
     }
 
-    static void WriteVehicle(BitWriter w, uint id, float rpm, float throttle, float brake, float steering, int gear)
+    static bool IsEngineRunning(VehicleParts v) =>
+        v.Starter != null && System.Array.IndexOf(EngineRunningStates, v.Starter.ActiveStateName) >= 0;
+
+    static void WriteVehicle(BitWriter w, uint id, float rpm, float throttle, float brake, float steering, int gear, bool running)
     {
         w.WriteUInt(id);
         Quantize.WriteRanged(w, rpm, 0, 10000, 14);
@@ -195,6 +298,43 @@ sealed class ObjectSync
         Quantize.WriteRanged(w, brake, 0, 1, 8);
         Quantize.WriteRanged(w, steering, -1, 1, 8);
         w.Write((uint)Mathf.Clamp(gear, 0, 15), 4);
+        w.WriteBool(running);
+    }
+
+    // Doors, hood and boot lid swing on their hinges, so the driver sends where each part sits on
+    // the car whenever it moved, and every part now and then in case a packet was lost.
+    static void WriteAttached(BitWriter w, NetObject vehicle)
+    {
+        var countPosition = w.BitPosition;
+        w.Write(0, AttachedCountBits);
+        var count = 0;
+        var t = vehicle.Go.transform;
+        var inverse = Quaternion.Inverse(t.rotation);
+        var now = Time.time;
+        foreach (var part in vehicle.Vehicle.Attached)
+        {
+            if (count == MaxAttachedPerVehicle)
+                break;
+            var position = inverse * (part.Go.transform.position - t.position);
+            var rotation = inverse * part.Go.transform.rotation;
+            if (now - part.LastLocalSend < LocalRefreshSeconds
+                && (position - part.LastSentLocalPosition).sqrMagnitude < 1e-6f
+                && Quaternion.Angle(rotation, part.LastSentLocalRotation) < 0.25f)
+                continue;
+            part.LastSentLocalPosition = position;
+            part.LastSentLocalRotation = rotation;
+            part.LastLocalSend = now;
+            WriteLocalPose(w, part.Id, ToNet(position), ToNet(rotation));
+            count++;
+        }
+        w.Patch(countPosition, (uint)count, AttachedCountBits);
+    }
+
+    static void WriteLocalPose(BitWriter w, uint id, Vec3 position, Quat rotation)
+    {
+        w.WriteUInt(id);
+        Quantize.WriteVector(w, position, LocalRange, LocalBits);
+        Quantize.WriteRotation(w, rotation, ObjectMessages.RotationBits);
     }
 
     void ReadVehicles(Connection from, BitReader r)
@@ -215,30 +355,55 @@ sealed class ObjectSync
             var brake = Quantize.ReadRanged(r, 0, 1, 8);
             var steering = Quantize.ReadRanged(r, -1, 1, 8);
             var gear = (int)r.Read(4);
+            var running = r.ReadBool();
+            var attachedCount = (int)r.Read(AttachedCountBits);
             if (r.Overflow)
                 return;
             var obj = registry.Find(id);
-            if (obj?.Vehicle == null || obj.Owner.Owner != owner || !obj.Proxy)
-                continue;
-            var v = obj.Vehicle;
-            v.Rpm = rpm;
-            v.Throttle = throttle;
-            v.Brake = brake;
-            v.Steering = steering;
-            v.Gear = gear;
-            v.HasState = true;
-
-            if (!session.IsHost || session.Connections.Count < 2)
-                continue;
-            if (relay == null)
+            var valid = obj?.Vehicle != null && obj.Owner.Owner == owner && obj.Proxy;
+            if (valid)
             {
-                relay = session.BeginMessage(MessageType.VehicleStates);
-                relay.Write(owner, ObjectMessages.SlotBits);
-                relayCountPosition = relay.BitPosition;
-                relay.Write(0, ObjectMessages.CountBits);
+                var v = obj.Vehicle;
+                v.Rpm = rpm;
+                v.Throttle = throttle;
+                v.Brake = brake;
+                v.Steering = steering;
+                v.Gear = gear;
+                v.RemoteRunning = running;
+                v.HasState = true;
             }
-            WriteVehicle(relay, id, rpm, throttle, brake, steering, gear);
-            relayCount++;
+
+            var relaying = valid && session.IsHost && session.Connections.Count > 1;
+            if (relaying)
+            {
+                if (relay == null)
+                {
+                    relay = session.BeginMessage(MessageType.VehicleStates);
+                    relay.Write(owner, ObjectMessages.SlotBits);
+                    relayCountPosition = relay.BitPosition;
+                    relay.Write(0, ObjectMessages.CountBits);
+                }
+                WriteVehicle(relay, id, rpm, throttle, brake, steering, gear, running);
+                relay.Write((uint)attachedCount, AttachedCountBits);
+                relayCount++;
+            }
+            for (var j = 0; j < attachedCount; j++)
+            {
+                var partId = r.ReadUInt();
+                var position = Quantize.ReadVector(r, LocalRange, LocalBits);
+                var rotation = Quantize.ReadRotation(r, ObjectMessages.RotationBits);
+                if (r.Overflow)
+                    return;
+                if (!valid)
+                    continue;
+                if (relaying)
+                    WriteLocalPose(relay, partId, position, rotation);
+                var part = registry.Find(partId);
+                if (part?.AttachedTo != obj)
+                    continue;
+                part.LocalPositionTarget = ToUnity(position);
+                part.LocalRotationTarget = ToUnity(rotation);
+            }
         }
         if (relay == null)
             return;
@@ -248,8 +413,22 @@ sealed class ObjectSync
 
     static void ApplyVehicle(VehicleParts v)
     {
+        // The game switches these back on itself, e.g. when the engine starts.
+        if (v.Drivetrain != null && v.Drivetrain.enabled)
+        {
+            v.DrivetrainWasEnabled = true;
+            v.Drivetrain.enabled = false;
+        }
+        if (v.Controller != null && v.Controller.enabled)
+        {
+            v.ControllerWasEnabled = true;
+            v.Controller.enabled = false;
+        }
+        foreach (var fsm in v.DriverOnly)
+            fsm.enabled = false;
         if (!v.HasState || v.Drivetrain == null)
             return;
+        ApplyEngine(v);
         v.Drivetrain.rpm = Mathf.Lerp(v.Drivetrain.rpm, v.Rpm, RpmSmoothing);
         v.Drivetrain.throttle = v.Throttle;
         if (v.Gear < v.Drivetrain.gearRatios.Length)
@@ -262,6 +441,23 @@ sealed class ObjectSync
         }
         foreach (var wheel in v.Wheels)
             wheel.steering = v.Steering;
+    }
+
+    // Starting is a random roll on the driver's machine, so a running engine is entered directly
+    // through the state that follows a successful start. Stopping needs nothing: the driver's rpm
+    // falls below the game's own stall threshold.
+    static void ApplyEngine(VehicleParts v)
+    {
+        if (!v.RemoteRunning)
+        {
+            v.StartSent = false;
+            return;
+        }
+        if (v.StartSent || v.Starter == null)
+            return;
+        v.StartSent = true;
+        if (!IsEngineRunning(v))
+            v.Starter.SendEvent(StartEngineEvent);
     }
 
     const float RecentlyHeldSeconds = 3f;
@@ -291,6 +487,7 @@ sealed class ObjectSync
     {
         obj.Body = null;
         obj.NextBodyCheck = 0;
+        obj.NextAttachCheck = 0;
     }
 
     public void ClaimNextStep(NetObject obj)
@@ -303,6 +500,8 @@ sealed class ObjectSync
     // mesh destroy themselves on the machine where it happened.
     void Gone(NetObject obj)
     {
+        if (obj.AttachedTo != null)
+            Unattach(obj);
         registry.Remove(obj);
         if (obj.DestroyedByNetwork)
             return;
@@ -342,6 +541,12 @@ sealed class ObjectSync
 
     void Claim(NetObject obj, bool held)
     {
+        if (obj.AttachedTo != null)
+        {
+            UpdateAttachment(obj, Body(obj));
+            if (obj.AttachedTo != null)
+                return;
+        }
         if (Diagnostics.Logging)
             Diagnostics.Log("claim " + obj.Id.ToString("x8") + " " + obj.Key + " held=" + held);
         obj.RestSteps = 0;
@@ -401,7 +606,7 @@ sealed class ObjectSync
         {
             var index = (start + n) % objects.Count;
             var obj = objects[index];
-            if (obj.Owner.Owner != Local || obj.Proxy)
+            if (obj.Owner.Owner != Local || obj.Proxy || obj.AttachedTo != null)
                 continue;
             var body = Body(obj);
             if (body == null || !obj.Owner.Held && (body.isKinematic || body.IsSleeping()))
@@ -570,6 +775,8 @@ sealed class ObjectSync
         obj.Owner = info;
         obj.Pending = false;
         obj.RestSteps = 0;
+        if (obj.AttachedTo != null)
+            return;
         var heldElsewhere = info.IsOwned && info.Owner != Local && info.Held;
         if (obj.SeatTriggers != null)
         {
@@ -724,6 +931,8 @@ sealed class ObjectSync
         {
             if (!obj.IsVehicle)
                 continue;
+            obj.Vehicle.Lod?.AddSharedGlobalTransition(ReanchorEvent, "OFF");
+            obj.Vehicle.Starter?.AddSharedGlobalTransition(StartEngineEvent, "Start engine");
             foreach (var fsm in obj.Go.GetComponentsInChildren<PlayMakerFSM>(true))
             {
                 if (fsm.FsmName != "PlayerTrigger" || fsm.gameObject.name != "DriveTrigger")
@@ -789,10 +998,13 @@ sealed class ObjectSync
         buffer.AdvanceDelay(dt);
         if (!buffer.Sample(hostTime - buffer.Delay, out var m))
             return;
+        obj.TargetPosition = ToUnity(m.Position);
+        obj.TargetRotation = ToUnity(m.Rotation);
+        obj.HasTarget = true;
         if (body != null)
         {
-            body.MovePosition(ToUnity(m.Position));
-            body.MoveRotation(ToUnity(m.Rotation));
+            body.MovePosition(obj.TargetPosition);
+            body.MoveRotation(obj.TargetRotation);
         }
         else
         {
@@ -806,12 +1018,15 @@ sealed class ObjectSync
         if (obj.Proxy)
             return;
         obj.Proxy = true;
+        obj.HasTarget = false;
         obj.Buffer ??= new SnapshotBuffer();
         obj.Buffer.Clear();
         var v = obj.Vehicle;
         if (v != null)
         {
             v.HasState = false;
+            v.RemoteRunning = false;
+            v.StartSent = false;
             if (v.Drivetrain != null)
             {
                 v.DrivetrainWasEnabled = v.Drivetrain.enabled;
@@ -844,12 +1059,30 @@ sealed class ObjectSync
                 v.Drivetrain.enabled = v.DrivetrainWasEnabled;
             if (v.Controller != null)
                 v.Controller.enabled = v.ControllerWasEnabled;
+            foreach (var fsm in v.DriverOnly)
+                fsm.enabled = true;
+            Reanchor(obj, v);
         }
         var body = Body(obj);
         if (body == null)
             return;
         body.isKinematic = obj.GameKinematic;
         body.interpolation = obj.GameInterpolation;
+    }
+
+    // Out of view range the game pins a parked vehicle to the world with a joint at the spot where it
+    // left the range. A vehicle someone else drove away from there would be pulled back once it is
+    // simulated here again, so the pin is set again where the vehicle is now.
+    static void Reanchor(NetObject obj, VehicleParts v)
+    {
+        if (v.Lod == null || v.Lod.ActiveStateName != "OFF")
+            return;
+        foreach (var joint in obj.Go.GetComponents<FixedJoint>())
+        {
+            if (joint.connectedBody == null)
+                Object.DestroyImmediate(joint);
+        }
+        v.Lod.SendEvent(ReanchorEvent);
     }
 
     // A part without a rigidbody is bolted onto something and placed by its parent; a world pose
