@@ -23,6 +23,7 @@ sealed class Avatar
     const float CrouchDepth = 0.42f;
     const float CrouchLean = 20f;
     const float CrouchSpeed = 6f;
+    const float GestureSpeed = 8f;
 
     // Traffic drivers share the walkers' rig but have no animation: their skeleton is posed seated.
     const string SeatedTemplate = "VehiclesHighway/FITTAN/LOD/Passengers/Driver/skeleton";
@@ -44,10 +45,17 @@ sealed class Avatar
     readonly int[] thighs;
     readonly int[] knees;
     readonly int[] ankles;
+    readonly int[] upperArms;
+    readonly int[] forearms;
+    readonly int[] hands;
+    readonly bool[] armChains = new bool[2];
     Quaternion facing = Quaternion.identity;
     float pitch;
     float crouch;
     bool crouching;
+    Gesture gesture;
+    Gesture shown;
+    float gestureWeight;
     string playing;
     bool seated;
 
@@ -77,6 +85,17 @@ sealed class Avatar
         thighs = new[] { Bone("thig_left"), Bone("thig_right") };
         knees = new[] { Bone("knee_left"), Bone("knee_right") };
         ankles = new[] { Bone("ankle_left"), Bone("ankle_right") };
+        upperArms = new[] { Bone("shoulder_left"), Bone("shoulder_right") };
+        forearms = new[] { Bone("arm_left"), Bone("arm_right") };
+        hands = new[] { Bone("hand_left"), Bone("hand_right") };
+        // The arms are solved as two-bone chains, which only holds if the rig nests them that way.
+        for (var i = 0; i < 2; i++)
+        {
+            armChains[i] = upperArms[i] >= 0 && forearms[i] >= 0 && hands[i] >= 0
+                && bones[forearms[i]].parent == bones[upperArms[i]] && bones[hands[i]].parent == bones[forearms[i]];
+        }
+        if (!armChains[0] || !armChains[1])
+            ModConsole.Warning("Co-op: the player model's arms are rigged differently than expected, gestures will not show.");
 
         // HeadPivot is what the NPC's look-at FSM aims at its target, so it is aimed the same way here.
         if (head >= 0)
@@ -125,8 +144,9 @@ sealed class Avatar
             bones, standing, CaptureSeatedPose(skeleton, bones), modelOffset, modelRotation);
     }
 
-    public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Transform camera)
+    public void Apply(Vector3 position, Quaternion rotation, Vector3 velocity, PlayerFlags flags, Gesture gesture, Transform camera)
     {
+        this.gesture = gesture;
         var inVehicle = (flags & PlayerFlags.InVehicle) != 0;
         crouching = !inVehicle && (flags & PlayerFlags.Crouching) != 0;
         facing = rotation;
@@ -175,10 +195,57 @@ sealed class Avatar
             Crouch(right);
         if (chest >= 0)
             bones[chest].rotation = Quaternion.AngleAxis(pitch * ChestShareOfPitch, right) * bones[chest].rotation;
+
+        // The last gesture stays posed while it fades out, so letting go of a key does not snap the arm down.
+        if (gesture != Gesture.None)
+            shown = gesture;
+        gestureWeight = Mathf.MoveTowards(gestureWeight, gesture != Gesture.None ? 1f : 0f, deltaTime * GestureSpeed);
+        if (gestureWeight > 0)
+            PoseArms(right);
         if (headPivot >= 0)
             bones[headPivot].rotation = facing * Quaternion.Euler(pitch, 0, 0);
         else if (head >= 0)
             bones[head].rotation = Quaternion.AngleAxis(pitch * (1 - ChestShareOfPitch), right) * bones[head].rotation;
+    }
+
+    // NPCs have no gesture clips either, so each gesture is an arm reaching in a direction.
+    void PoseArms(Vector3 right)
+    {
+        var look = facing * Quaternion.Euler(pitch, 0, 0) * Vector3.forward;
+        switch (shown)
+        {
+            case Gesture.Finger:
+                Reach(1, (look + Vector3.up * 0.35f).normalized, 0.95f);
+                break;
+            case Gesture.Hitchhike:
+                Reach(1, (right + look * 0.3f).normalized, 0.98f);
+                break;
+            case Gesture.Hit:
+                Reach(1, look, 0.98f);
+                break;
+            case Gesture.Push:
+                Reach(0, look, 0.8f);
+                Reach(1, look, 0.8f);
+                break;
+        }
+    }
+
+    void Reach(int side, Vector3 direction, float extension)
+    {
+        if (!armChains[side])
+            return;
+        var upper = bones[upperArms[side]];
+        var lower = bones[forearms[side]];
+        var hand = bones[hands[side]];
+        var upperBefore = upper.localRotation;
+        var lowerBefore = lower.localRotation;
+
+        var length = Vector3.Distance(upper.position, lower.position) + Vector3.Distance(lower.position, hand.position);
+        SolveLimb(upper, lower, hand, upper.position + direction * (length * extension), Vector3.down);
+
+        // Blended in local space: the forearm's solved rotation is relative to the solved upper arm.
+        upper.localRotation = Quaternion.Slerp(upperBefore, upper.localRotation, gestureWeight);
+        lower.localRotation = Quaternion.Slerp(lowerBefore, lower.localRotation, gestureWeight);
     }
 
     // There is no crouch clip for NPCs, so the skeleton is lowered with the feet kept where the
@@ -196,11 +263,11 @@ sealed class Avatar
         for (var i = 0; i < 2; i++)
         {
             if (thighs[i] >= 0 && knees[i] >= 0 && ankles[i] >= 0)
-                SolveLeg(bones[thighs[i]], bones[knees[i]], bones[ankles[i]], i == 0 ? leftFoot : rightFoot, forward);
+                SolveLimb(bones[thighs[i]], bones[knees[i]], bones[ankles[i]], i == 0 ? leftFoot : rightFoot, forward);
         }
     }
 
-    static void SolveLeg(Transform thigh, Transform knee, Transform ankle, Vector3 target, Vector3 bendHint)
+    static void SolveLimb(Transform thigh, Transform knee, Transform ankle, Vector3 target, Vector3 bendHint)
     {
         var hip = thigh.position;
         var upper = Vector3.Distance(hip, knee.position);
@@ -232,6 +299,8 @@ sealed class Avatar
         {
             ResetBone(thighs[i]);
             ResetBone(knees[i]);
+            ResetBone(upperArms[i]);
+            ResetBone(forearms[i]);
         }
     }
 

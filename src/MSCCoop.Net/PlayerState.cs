@@ -10,9 +10,20 @@ public enum PlayerFlags : byte
     InVehicle = 2,
 }
 
+// The game's own gesture actions; each is one of its cInput buttons.
+public enum Gesture : byte
+{
+    None,
+    Finger,
+    Hitchhike,
+    Hit,
+    Push,
+}
+
 public struct PlayerState
 {
     const int FlagBits = 2;
+    const int GestureBits = 3;
     const int YawBits = 10;
     const int PitchBits = 8;
 
@@ -23,6 +34,7 @@ public struct PlayerState
     public float Yaw;
     public float Pitch;
     public PlayerFlags Flags;
+    public Gesture Gesture;
 
     // Non-zero while seated: position and yaw are then relative to that vehicle, so the avatar
     // stays in its seat instead of following a second, separately interpolated stream.
@@ -37,6 +49,7 @@ public struct PlayerState
         Quantize.WriteRanged(w, Repeat(Yaw), 0, 360, YawBits);
         Quantize.WriteRanged(w, Pitch, -90, 90, PitchBits);
         w.Write((uint)Flags, FlagBits);
+        w.Write((uint)Gesture, GestureBits);
         w.WriteBool(Vehicle != 0);
         if (Vehicle != 0)
             w.WriteUInt(Vehicle);
@@ -54,6 +67,8 @@ public struct PlayerState
             Pitch = Quantize.ReadRanged(r, -90, 90, PitchBits),
             Flags = (PlayerFlags)r.Read(FlagBits),
         };
+        var gesture = r.Read(GestureBits);
+        s.Gesture = gesture <= (uint)Gesture.Push ? (Gesture)gesture : Gesture.None;
         if (r.ReadBool())
             s.Vehicle = r.ReadUInt();
         return s;

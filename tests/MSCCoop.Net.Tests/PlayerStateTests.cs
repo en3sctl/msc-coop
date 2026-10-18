@@ -16,6 +16,7 @@ public class PlayerStateTests
             Yaw = -45,
             Pitch = 30,
             Flags = PlayerFlags.Crouching | PlayerFlags.InVehicle,
+            Gesture = Gesture.Hitchhike,
         };
         var buffer = new byte[64];
         var w = new BitWriter(buffer);
@@ -30,6 +31,7 @@ public class PlayerStateTests
         Assert.Equal(315, read.Yaw, 0);
         Assert.Equal(30, read.Pitch, 0);
         Assert.Equal(state.Flags, read.Flags);
+        Assert.Equal(state.Gesture, read.Gesture);
     }
 
     [Fact]
@@ -46,6 +48,34 @@ public class PlayerStateTests
         Assert.Equal(2, second.Slot);
         Assert.Equal(0u, second.Vehicle);
         Assert.False(r.Overflow);
+    }
+
+    [Fact]
+    public void GestureRoundTrips()
+    {
+        var buffer = new byte[64];
+        var w = new BitWriter(buffer);
+        new PlayerState { Slot = 1, Gesture = Gesture.Finger }.Write(w);
+        new PlayerState { Slot = 2, Gesture = Gesture.Push, Vehicle = 7 }.Write(w);
+
+        var r = new BitReader(buffer, w.Length);
+        Assert.Equal(Gesture.Finger, PlayerState.Read(r).Gesture);
+        var second = PlayerState.Read(r);
+        Assert.Equal(Gesture.Push, second.Gesture);
+        Assert.Equal(7u, second.Vehicle);
+        Assert.False(r.Overflow);
+    }
+
+    [Fact]
+    public void UnknownGestureReadsAsNone()
+    {
+        var buffer = new byte[64];
+        var w = new BitWriter(buffer);
+        new PlayerState { Slot = 1, Gesture = (Gesture)7 }.Write(w);
+
+        var read = PlayerState.Read(new BitReader(buffer, w.Length));
+        Assert.Equal(Gesture.None, read.Gesture);
+        Assert.Equal(1, read.Slot);
     }
 
     [Fact]

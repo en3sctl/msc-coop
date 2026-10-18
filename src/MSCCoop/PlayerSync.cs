@@ -9,16 +9,23 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
     const double SendInterval = 0.05;
     const float CrouchDrop = 0.35f;
 
+    // A punch or push is a single key press; it is held this long so a 20 Hz state packet carries it.
+    const float StrikeHold = 0.45f;
+
     readonly SnapshotBuffer[] buffers = new SnapshotBuffer[Protocol.MaxPlayers];
     readonly Avatar[] avatars = new Avatar[Protocol.MaxPlayers];
     readonly PlayerFlags[] flags = new PlayerFlags[Protocol.MaxPlayers];
     readonly uint[] frames = new uint[Protocol.MaxPlayers];
     readonly float[] pitches = new float[Protocol.MaxPlayers];
+    readonly Gesture[] gestures = new Gesture[Protocol.MaxPlayers];
     Session session;
     Transform player;
     CharacterController controller;
     FsmGameObject pov;
     FsmString currentVehicle;
+    FsmBool inMenu;
+    Gesture strike;
+    float strikeUntil;
     float standingEyes;
     Vector3 lastPosition;
     uint lastFrame;
@@ -62,6 +69,8 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
         var globals = PlayMakerGlobals.Instance.Variables;
         pov = globals.FindFsmGameObject("POV");
         currentVehicle = globals.FindFsmString("PlayerCurrentVehicle");
+        inMenu = globals.FindFsmBool("PlayerInMenu");
+        strike = Gesture.None;
         lastSendTime = double.NaN;
     }
 
@@ -71,6 +80,7 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
             return;
 
         var hostTime = session.HostTime;
+        PollStrike();
         if (hostTime >= nextSend || nextSend - hostTime > 1)
             Send(hostTime);
 
@@ -93,7 +103,7 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
                 position = frame.TransformPoint(position);
                 rotation = frame.rotation * rotation;
             }
-            avatar.Apply(position, rotation, ToUnity(m.Velocity), flags[slot], camera);
+            avatar.Apply(position, rotation, ToUnity(m.Velocity), flags[slot], gestures[slot], camera);
         }
     }
 
@@ -130,6 +140,7 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
             Yaw = yaw,
             Pitch = Pitch(),
             Flags = LocalFlags(),
+            Gesture = LocalGesture(frame != 0 || passenger.Seated),
             Vehicle = frame,
         };
         state.Write(session.BeginMessage(MessageType.PlayerState));
@@ -169,6 +180,7 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
             Rotation = PlayerState.YawRotation(state.Yaw),
         });
         flags[state.Slot] = state.Flags;
+        gestures[state.Slot] = state.Gesture;
         pitches[state.Slot] = state.Pitch;
     }
 
@@ -186,6 +198,30 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
             return 0;
         var forward = pov.Value.transform.forward;
         return -Mathf.Asin(Mathf.Clamp(forward.y, -1f, 1f)) * Mathf.Rad2Deg;
+    }
+
+    void PollStrike()
+    {
+        if (inMenu != null && inMenu.Value)
+            return;
+        var pressed = cInput.GetKeyDown("Hit") ? Gesture.Hit : cInput.GetKeyDown("Push") ? Gesture.Push : Gesture.None;
+        if (pressed == Gesture.None)
+            return;
+        strike = pressed;
+        strikeUntil = Time.time + StrikeHold;
+    }
+
+    Gesture LocalGesture(bool seated)
+    {
+        if (inMenu != null && inMenu.Value)
+            return Gesture.None;
+        if (cInput.GetKey("Finger"))
+            return Gesture.Finger;
+        if (seated)
+            return Gesture.None;
+        if (strike != Gesture.None && Time.time < strikeUntil)
+            return strike;
+        return cInput.GetKey("Hitchhike") ? Gesture.Hitchhike : Gesture.None;
     }
 
     PlayerFlags LocalFlags()
@@ -206,6 +242,7 @@ sealed class PlayerSync(ObjectRegistry registry, PassengerSeat passenger)
             return;
         avatars[slot].Destroy();
         avatars[slot] = null;
+        gestures[slot] = Gesture.None;
         buffers[slot].Clear();
     }
 
