@@ -98,9 +98,9 @@ sealed class SteamLobby
         var hostProtocol = SteamMatchmaking.GetLobbyData(lobby, ProtocolKey);
         string problem = null;
         if (hostProtocol != Protocol.Version.ToString() || hostVersion != modVersion)
-            problem = "Host runs mod version " + hostVersion + ", you run " + modVersion + ".";
+            problem = "Host runs mod " + hostVersion + " protocol " + hostProtocol + ", you run " + modVersion + " protocol " + Protocol.Version + ". Use the same MSCCoop.dll.";
         else if (hostBuild != gameBuild.ToString())
-            problem = "Host runs game build " + hostBuild + ", you run " + gameBuild + ".";
+            problem = "Host runs game build " + hostBuild + ", you run " + gameBuild + ". Both need the same game update.";
 
         if (problem != null)
         {

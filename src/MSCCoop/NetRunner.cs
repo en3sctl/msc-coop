@@ -141,6 +141,9 @@ sealed class NetRunner : MonoBehaviour
 
     public void ToggleOverlay() => overlay = !overlay;
 
+    public void PrintVersion() =>
+        ModConsole.Print("Co-op: mod " + modVersion + ", protocol " + Protocol.Version + ", game build " + gameBuild + ".");
+
     public void Dump() => ModConsole.Print("Co-op: state written to " + Diagnostics.Write(dumpDir, session, objects.Registry, shared));
 
     public void SetLogging(bool on)

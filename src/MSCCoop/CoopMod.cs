@@ -40,7 +40,7 @@ class CoopCommand(NetRunner runner) : ConsoleCommand
 
     public override string Help =>
         "coop host | coop host lan [port] | coop join lan IP [port] | coop invite | coop leave | " +
-        "coop sim LATENCY_MS JITTER_MS LOSS_PERCENT | coop overlay | coop dump | coop log on|off";
+        "coop sim LATENCY_MS JITTER_MS LOSS_PERCENT | coop overlay | coop dump | coop log on|off | coop version";
 
     public override void Run(string[] rawArgs)
     {
@@ -72,6 +72,9 @@ class CoopCommand(NetRunner runner) : ConsoleCommand
                 break;
             case "dump":
                 runner.Dump();
+                break;
+            case "version":
+                runner.PrintVersion();
                 break;
             case "log" when args.Length > 1:
                 runner.SetLogging(args[1] == "on");
